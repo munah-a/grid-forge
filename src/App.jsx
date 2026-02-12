@@ -20,6 +20,8 @@ import {
 import GriddingWorker from "./gridding.worker.js?worker";
 import { CRS_REGISTRY, fetchCRSDefinition, transformPoints, transformCoord, isGeographicCRS } from "./crs.js";
 
+const APP_VERSION = "1.0.0-rc.9";
+
 // ─── Theme Colors ─────────────────────────────────────────────────────────────
 const C = {
   bg: "#0a0f1e", panel: "#0f1629", panelBorder: "#1a2340", surface: "#141c33",
@@ -1806,7 +1808,7 @@ export default function GridForgeGIS() {
       <div style={{ display: "flex", alignItems: "center", height: 44, padding: "0 16px", background: C.panel, borderBottom: `1px solid ${C.panelBorder}`, gap: 12, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <div style={{ width: 28, height: 28, borderRadius: 6, background: `linear-gradient(135deg,${C.accent},${C.green})`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, color: "#fff" }}>G</div>
-          <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: -0.3 }}>Grid<span style={{ color: C.accent }}>Forge</span><span style={{ color: C.textMuted, fontWeight: 400, fontSize: 11, marginLeft: 6 }}>GIS</span></span>
+          <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: -0.3 }}>Grid<span style={{ color: C.accent }}>Forge</span><span style={{ color: C.textMuted, fontWeight: 400, fontSize: 11, marginLeft: 6 }}>GIS</span><span style={{ fontSize: 9, color: C.accent, background: C.accent + "18", padding: "2px 6px", borderRadius: 4, marginLeft: 8, fontWeight: 600, letterSpacing: 0.3 }}>v{APP_VERSION}</span></span>
         </div>
         <div style={{ flex: 1 }} />
         <div ref={coordsContainerRef} style={{ display: "none", gap: 12, fontSize: 11, fontFamily: "'JetBrains Mono',monospace", color: C.textMuted, padding: "4px 12px", background: C.surface, borderRadius: 4, border: `1px solid ${C.panelBorder}` }}>
@@ -2477,7 +2479,7 @@ export default function GridForgeGIS() {
           <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
             <Btn variant="ghost" onClick={() => { setBugTitle(""); setBugDesc(""); setShowBugReport(false); }}>Cancel</Btn>
             <Btn variant="primary" disabled={!bugTitle.trim()} onClick={() => {
-              const body = `## Description\n${bugDesc || "(No description provided)"}\n\n## Environment\n- Browser: ${navigator.userAgent.slice(0, 120)}\n- Points: ${points.length}\n- CRS: ${projectCRS}\n- Grid: ${gridData ? "Yes" : "No"}\n- Base Map: ${baseMap}\n- Panel: ${activePanel || "none"}`;
+              const body = `## Description\n${bugDesc || "(No description provided)"}\n\n## Environment\n- Version: ${APP_VERSION}\n- Browser: ${navigator.userAgent.slice(0, 120)}\n- Points: ${points.length}\n- CRS: ${projectCRS}\n- Grid: ${gridData ? "Yes" : "No"}\n- Base Map: ${baseMap}\n- Panel: ${activePanel || "none"}`;
               const url = `https://github.com/munah-a/grid-forge/issues/new?title=${encodeURIComponent(bugTitle.trim())}&body=${encodeURIComponent(body)}&labels=bug`;
               window.open(url, "_blank");
               setBugTitle(""); setBugDesc(""); setShowBugReport(false);

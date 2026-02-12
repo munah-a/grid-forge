@@ -1,6 +1,6 @@
 {
   "name": "grid-forge-gis",
-  "version": "1.0.0",
+  "version": "1.0.0-rc.9",
   "description": "Client-side GIS web application for gridding, contouring & spatial visualization",
   "type": "module",
   "scripts": {
