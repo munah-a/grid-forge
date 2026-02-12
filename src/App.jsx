@@ -546,7 +546,7 @@ export default function GridForgeGIS() {
     const { clientWidth: w, clientHeight: h } = containerRef.current;
     const dW = bounds.xMax - bounds.xMin || 1, dH = bounds.yMax - bounds.yMin || 1;
     const scale = Math.min(w / (dW * 1.2), h / (dH * 1.2));
-    setViewState({ x: w / 2 - (bounds.xMin + dW / 2) * scale, y: h / 2 - (bounds.yMin + dH / 2) * scale, scale });
+    setViewState({ x: w / 2 - (bounds.xMin + dW / 2) * scale, y: h / 2 + (bounds.yMin + dH / 2) * scale, scale });
   }, [bounds]);
 
   useEffect(() => { if (points.length > 0) fitView(); }, [points.length]);
@@ -585,7 +585,7 @@ export default function GridForgeGIS() {
           for (const b of boundaries) {
             for (let vi = 0; vi < b.vertices.length; vi++) {
               const px = b.vertices[vi][0] * viewState.scale + viewState.x;
-              const py = b.vertices[vi][1] * viewState.scale + viewState.y;
+              const py = viewState.y - b.vertices[vi][1] * viewState.scale;
               const d = Math.sqrt((px - sx) ** 2 + (py - sy) ** 2);
               if (d < bestDist) { bestDist = d; bestHit = { type: "boundary", id: b.id, vertexIdx: vi, count: b.vertices.length }; }
             }
@@ -593,7 +593,7 @@ export default function GridForgeGIS() {
           for (const bl of breaklines) {
             for (let vi = 0; vi < bl.vertices.length; vi++) {
               const px = bl.vertices[vi][0] * viewState.scale + viewState.x;
-              const py = bl.vertices[vi][1] * viewState.scale + viewState.y;
+              const py = viewState.y - bl.vertices[vi][1] * viewState.scale;
               const d = Math.sqrt((px - sx) ** 2 + (py - sy) ** 2);
               if (d < bestDist) { bestDist = d; bestHit = { type: "breakline", id: bl.id, vertexIdx: vi, count: bl.vertices.length }; }
             }
@@ -1319,7 +1319,7 @@ export default function GridForgeGIS() {
         if (isGeographic) {
           // Geographic CRS (EPSG:4326): screen coords are lon/lat directly
           const lonMin = -vx / scale, lonMax = (w - vx) / scale;
-          const latMin = -vy / scale, latMax = (h - vy) / scale;
+          const latMin = (vy - h) / scale, latMax = vy / scale;
           latLo = Math.max(-85.05, Math.min(latMin, latMax));
           latHi = Math.min(85.05, Math.max(latMin, latMax));
           lonLo = Math.max(-180, Math.min(lonMin, lonMax));
@@ -1328,10 +1328,10 @@ export default function GridForgeGIS() {
           // Projected CRS (e.g. UTM): transform screen corners to EPSG:4326
           projectedMode = true;
           const corners = [
-            [-vx / scale, -vy / scale],
-            [(w - vx) / scale, -vy / scale],
-            [(w - vx) / scale, (h - vy) / scale],
-            [-vx / scale, (h - vy) / scale],
+            [-vx / scale, vy / scale],
+            [(w - vx) / scale, vy / scale],
+            [(w - vx) / scale, (vy - h) / scale],
+            [-vx / scale, (vy - h) / scale],
           ];
           let minLon = 180, maxLon = -180, minLat = 90, maxLat = -90;
           for (const [cx, cy] of corners) {
@@ -1401,32 +1401,25 @@ export default function GridForgeGIS() {
                   const [pxSE, pySE] = transformCoord(est, sth, "EPSG:4326", projectCRS);
                   sL = pxNW * scale + vx;
                   sR = pxSE * scale + vx;
-                  // In projected CRS (e.g. UTM): pyNW > pySE (northing)
-                  // On screen: sN = pyNW*scale+vy > sS = pySE*scale+vy
-                  // North = higher screen y = further DOWN; South = lower screen y = UP
-                  const sN = pyNW * scale + vy, sS = pySE * scale + vy;
-                  sTop = Math.min(sN, sS); // screen-top = south (smaller y)
-                  sBot = Math.max(sN, sS); // screen-bottom = north (larger y)
+                  // Y-flipped: north (larger northing) → smaller screen Y (top)
+                  const sN = vy - pyNW * scale, sS = vy - pySE * scale;
+                  sTop = sN; // north = top of screen
+                  sBot = sS; // south = bottom of screen
                 } else {
                   // Geographic: data coords are lon/lat
                   const wst = tileX2lon(ttx, tz), est = tileX2lon(ttx + 1, tz);
                   const nth = tileY2lat(tty, tz), sth = tileY2lat(tty + 1, tz);
                   sL = wst * scale + vx;
                   sR = est * scale + vx;
-                  // nth > sth → sN > sS (north = further down on canvas)
-                  const sN = nth * scale + vy, sS = sth * scale + vy;
-                  sTop = sS; // south edge = smaller screen y = top
-                  sBot = sN; // north edge = larger screen y = bottom
+                  // Y-flipped: nth > sth → sN < sS (north = top of screen)
+                  const sN = vy - nth * scale, sS = vy - sth * scale;
+                  sTop = sN; // north = top of screen
+                  sBot = sS; // south = bottom of screen
                 }
                 const sW = sR - sL, sH = sBot - sTop;
                 if (sW > 0.5 && sH > 0.5) {
-                  // Tile image row 0 = north, but on screen north = bottom (sBot).
-                  // Flip vertically: translate to top, scale Y by -1, draw at -sH.
-                  ctx.save();
-                  ctx.translate(sL, sBot);
-                  ctx.scale(1, -1);
-                  ctx.drawImage(tile.img, 0, 0, sW, sH);
-                  ctx.restore();
+                  // Tile row 0 = north = sTop; draw directly (Y-flipped canvas)
+                  ctx.drawImage(tile.img, sL, sTop, sW, sH);
                 }
               }
             }
@@ -1452,23 +1445,23 @@ export default function GridForgeGIS() {
         const gridSpacing = Math.pow(10, Math.floor(Math.log10(200 / scale)));
         const majorSpacing = gridSpacing * 5;
         const startX = Math.floor((-vx / scale) / gridSpacing) * gridSpacing;
-        const startY = Math.floor((-vy / scale) / gridSpacing) * gridSpacing;
+        const startY = Math.floor(((vy - h) / scale) / gridSpacing) * gridSpacing;
         ctx.strokeStyle = bm.grid; ctx.lineWidth = 0.5;
         for (let gx = startX; gx < (-vx + w) / scale; gx += gridSpacing) { const sx = gx * scale + vx; ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, h); ctx.stroke(); }
-        for (let gy = startY; gy < (-vy + h) / scale; gy += gridSpacing) { const sy = gy * scale + vy; ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(w, sy); ctx.stroke(); }
+        for (let gy = startY; gy < vy / scale; gy += gridSpacing) { const sy = vy - gy * scale; ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(w, sy); ctx.stroke(); }
         ctx.strokeStyle = bm.gridMajor; ctx.lineWidth = 1;
         const msx = Math.floor((-vx / scale) / majorSpacing) * majorSpacing;
-        const msy = Math.floor((-vy / scale) / majorSpacing) * majorSpacing;
+        const msy = Math.floor(((vy - h) / scale) / majorSpacing) * majorSpacing;
         for (let gx = msx; gx < (-vx + w) / scale; gx += majorSpacing) { const sx = gx * scale + vx; ctx.beginPath(); ctx.moveTo(sx, 0); ctx.lineTo(sx, h); ctx.stroke(); }
-        for (let gy = msy; gy < (-vy + h) / scale; gy += majorSpacing) { const sy = gy * scale + vy; ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(w, sy); ctx.stroke(); }
+        for (let gy = msy; gy < vy / scale; gy += majorSpacing) { const sy = vy - gy * scale; ctx.beginPath(); ctx.moveTo(0, sy); ctx.lineTo(w, sy); ctx.stroke(); }
         if (showCoordLabels) {
           ctx.font = "9px 'JetBrains Mono',monospace"; ctx.fillStyle = bm.label;
           ctx.textAlign = "center";
           for (let gx = msx; gx < (-vx + w) / scale; gx += majorSpacing) { const sx = gx * scale + vx; if (sx > 30 && sx < w - 30) ctx.fillText(gx.toFixed(gx % 1 === 0 ? 0 : 1), sx, h - 34); }
           ctx.textAlign = "right";
-          for (let gy = msy; gy < (-vy + h) / scale; gy += majorSpacing) { const sy = gy * scale + vy; if (sy > 10 && sy < h - 40) ctx.fillText(gy.toFixed(gy % 1 === 0 ? 0 : 1), 36, sy + 3); }
+          for (let gy = msy; gy < vy / scale; gy += majorSpacing) { const sy = vy - gy * scale; if (sy > 10 && sy < h - 40) ctx.fillText(gy.toFixed(gy % 1 === 0 ? 0 : 1), 36, sy + 3); }
         }
-        const ox = 0 * scale + vx, oy = 0 * scale + vy;
+        const ox = 0 * scale + vx, oy = vy - 0 * scale;
         ctx.strokeStyle = bm.axis; ctx.lineWidth = 1.5;
         if (ox > 0 && ox < w) { ctx.beginPath(); ctx.moveTo(ox, 0); ctx.lineTo(ox, h); ctx.stroke(); }
         if (oy > 0 && oy < h) { ctx.beginPath(); ctx.moveTo(0, oy); ctx.lineTo(w, oy); ctx.stroke(); }
@@ -1483,10 +1476,14 @@ export default function GridForgeGIS() {
           const { gridX, gridY, nx, ny } = gridData;
           const cW = gridX[1] - gridX[0], cH = gridY[1] - gridY[0];
           const sx = (gridX[0] - cW / 2) * scale + vx;
-          const sy = (gridY[0] - cH / 2) * scale + vy;
+          const sy = vy - (gridY[0] - cH / 2) * scale;
+          // Row 0 = south (min Y) → must flip vertically so south is at bottom
+          ctx.save();
           ctx.imageSmoothingEnabled = false;
-          ctx.drawImage(offscreenRef.current, sx, sy, nx * cW * scale, ny * cH * scale);
-          ctx.imageSmoothingEnabled = true;
+          ctx.translate(sx, sy);
+          ctx.scale(1, -1);
+          ctx.drawImage(offscreenRef.current, 0, 0, nx * cW * scale, ny * cH * scale);
+          ctx.restore();
         } else if (layer.type === "contours" && contourData && gridData) {
           const range = effectiveZRange.range;
           const layerMajor = layer.majorInterval ?? 5;
@@ -1522,9 +1519,9 @@ export default function GridForgeGIS() {
               for (const pl of polylines) {
                 const pts = pl.points;
                 if (pts.length < 2) continue;
-                ctx.moveTo(pts[0][0] * scale + vx, pts[0][1] * scale + vy);
+                ctx.moveTo(pts[0][0] * scale + vx, vy - pts[0][1] * scale);
                 for (let k = 1; k < pts.length; k++) {
-                  ctx.lineTo(pts[k][0] * scale + vx, pts[k][1] * scale + vy);
+                  ctx.lineTo(pts[k][0] * scale + vx, vy - pts[k][1] * scale);
                 }
                 if (pl.closed) ctx.closePath();
               }
@@ -1536,7 +1533,7 @@ export default function GridForgeGIS() {
                 for (const pl of polylines) {
                   if (pl.points.length < 3) continue;
                   // Compute total arc length and screen-space points
-                  const screenPts = pl.points.map(p => [p[0] * scale + vx, p[1] * scale + vy]);
+                  const screenPts = pl.points.map(p => [p[0] * scale + vx, vy - p[1] * scale]);
                   let totalLen = 0;
                   const cumLen = [0];
                   for (let k = 1; k < screenPts.length; k++) {
@@ -1623,17 +1620,17 @@ export default function GridForgeGIS() {
               ctx.beginPath();
               for (let si = 0; si < segments.length; si++) {
                 const [p1, p2] = segments[si];
-                ctx.moveTo(p1[0] * scale + vx, p1[1] * scale + vy);
-                ctx.lineTo(p2[0] * scale + vx, p2[1] * scale + vy);
+                ctx.moveTo(p1[0] * scale + vx, vy - p1[1] * scale);
+                ctx.lineTo(p2[0] * scale + vx, vy - p2[1] * scale);
               }
               ctx.stroke();
               if (layerShowLabels && isMajor && segments.length > 3) {
                 const mid = segments[Math.floor(segments.length * 0.4)];
                 if (mid) {
-                  const mx = (mid[0][0] + mid[1][0]) / 2 * scale + vx, my = (mid[0][1] + mid[1][1]) / 2 * scale + vy;
+                  const mx = (mid[0][0] + mid[1][0]) / 2 * scale + vx, my = vy - (mid[0][1] + mid[1][1]) / 2 * scale;
                   if (mx > -30 && mx < w + 30 && my > -30 && my < h + 30) {
                     const ddx = mid[1][0] - mid[0][0], ddy = mid[1][1] - mid[0][1];
-                    let angle = Math.atan2(ddy * scale, ddx * scale);
+                    let angle = Math.atan2(-ddy * scale, ddx * scale);
                     if (angle > Math.PI / 2) angle -= Math.PI;
                     else if (angle < -Math.PI / 2) angle += Math.PI;
                     labelQueue.push({ lbl: level.toFixed(1), lx: mx, ly: my, angle, size: layerLabelSize });
@@ -1720,7 +1717,7 @@ export default function GridForgeGIS() {
             const p = points[pi];
             if (hasDescFilter && hiddenDescs.has(String(p.desc || ""))) continue;
             if (hasFilter && (p.z < filterMin || p.z > filterMax)) continue;
-            const sx = p.x * scale + vx, sy = p.y * scale + vy;
+            const sx = p.x * scale + vx, sy = vy - p.y * scale;
             if (sx < -10 || sx > w + 10 || sy < -10 || sy > h + 10) continue;
 
             if (useLOD) {
@@ -1753,7 +1750,7 @@ export default function GridForgeGIS() {
             for (const pi of selectedPts) {
               if (pi >= points.length) continue;
               const p = points[pi];
-              const sx = p.x * scale + vx, sy = p.y * scale + vy;
+              const sx = p.x * scale + vx, sy = vy - p.y * scale;
               if (sx < -10 || sx > w + 10 || sy < -10 || sy > h + 10) continue;
               ctx.beginPath();
               ctx.arc(sx, sy, baseSz * 1.5, 0, 6.2832);
@@ -1776,7 +1773,7 @@ export default function GridForgeGIS() {
               const p = points[pi];
               if (hasDescFilter && hiddenDescs.has(String(p.desc || ""))) continue;
               if (hasFilter && (p.z < filterMin || p.z > filterMax)) continue;
-              const sx = p.x * scale + vx, sy = p.y * scale + vy;
+              const sx = p.x * scale + vx, sy = vy - p.y * scale;
               if (sx < -10 || sx > w + 10 || sy < -10 || sy > h + 10) continue;
               if (useLOD && drawnBins) {
                 const bx = (sx / binSize) | 0, by = (sy / binSize) | 0;
@@ -1810,7 +1807,7 @@ export default function GridForgeGIS() {
         ctx.fillStyle = "rgba(6,182,212,0.08)";
         ctx.beginPath();
         lassoPts.forEach((lp, i) => {
-          const sx = lp.x * scale + vx, sy = lp.y * scale + vy;
+          const sx = lp.x * scale + vx, sy = vy - lp.y * scale;
           i === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
         });
         if (lassoPts.length > 2) { ctx.closePath(); ctx.fill(); }
@@ -1819,7 +1816,7 @@ export default function GridForgeGIS() {
         // Draw vertices
         ctx.fillStyle = "#06b6d4";
         for (const lp of lassoPts) {
-          const sx = lp.x * scale + vx, sy = lp.y * scale + vy;
+          const sx = lp.x * scale + vx, sy = vy - lp.y * scale;
           ctx.beginPath(); ctx.arc(sx, sy, 4, 0, 6.2832); ctx.fill();
         }
         ctx.restore();
@@ -1858,7 +1855,7 @@ export default function GridForgeGIS() {
         ctx.strokeStyle = "#ff4444"; ctx.lineWidth = 2.5; ctx.setLineDash([8, 4]);
         ctx.beginPath();
         measurePts.forEach(([mx, my], mi) => {
-          const sx = mx * scale + vx, sy = my * scale + vy;
+          const sx = mx * scale + vx, sy = vy - my * scale;
           mi === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
         });
         if (measureMode === "area" && measurePts.length > 2) ctx.closePath();
@@ -1871,7 +1868,7 @@ export default function GridForgeGIS() {
           cumDist += dist;
           const bearing = measureBearing(x1, y1, x2, y2);
           const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-          const sx = mx * scale + vx, sy = my * scale + vy;
+          const sx = mx * scale + vx, sy = vy - my * scale;
           let segLabel = `${dist.toFixed(2)}  ${formatBearing(bearing)}`;
           // Slope label when Z available
           const z1 = zVals[i], z2 = zVals[i + 1];
@@ -1887,7 +1884,7 @@ export default function GridForgeGIS() {
           const dist = measureDistance(x1, y1, x2, y2);
           const bearing = measureBearing(x1, y1, x2, y2);
           const mx = (x1 + x2) / 2, my = (y1 + y2) / 2;
-          const sx = mx * scale + vx, sy = my * scale + vy;
+          const sx = mx * scale + vx, sy = vy - my * scale;
           let segLabel = `${dist.toFixed(2)}  ${formatBearing(bearing)}`;
           const z1 = zVals[measurePts.length - 1], z2 = zVals[0];
           if (!isNaN(z1) && !isNaN(z2) && dist > 0) {
@@ -1899,7 +1896,7 @@ export default function GridForgeGIS() {
         // Numbered vertex markers with cumulative distance and elevation
         cumDist = 0;
         measurePts.forEach(([mx, my], mi) => {
-          const sx = mx * scale + vx, sy = my * scale + vy;
+          const sx = mx * scale + vx, sy = vy - my * scale;
           if (mi > 0) cumDist += measureDistance(measurePts[mi - 1][0], measurePts[mi - 1][1], mx, my);
           // White filled circle with red border
           ctx.beginPath(); ctx.arc(sx, sy, 8, 0, Math.PI * 2);
@@ -1925,13 +1922,13 @@ export default function GridForgeGIS() {
           const perim = measurePolylineLength(measurePts) + measureDistance(measurePts[measurePts.length - 1][0], measurePts[measurePts.length - 1][1], measurePts[0][0], measurePts[0][1]);
           const cx = measurePts.reduce((s, p) => s + p[0], 0) / measurePts.length;
           const cy = measurePts.reduce((s, p) => s + p[1], 0) / measurePts.length;
-          haloText(`Area: ${area.toFixed(2)} sq units`, cx * scale + vx, cy * scale + vy - 8, "bold 12px 'DM Sans',sans-serif", "#ff4444");
-          haloText(`Perim: ${perim.toFixed(2)} units`, cx * scale + vx, cy * scale + vy + 8, "11px 'DM Sans',sans-serif", "#ff4444");
+          haloText(`Area: ${area.toFixed(2)} sq units`, cx * scale + vx, vy - cy * scale - 8, "bold 12px 'DM Sans',sans-serif", "#ff4444");
+          haloText(`Perim: ${perim.toFixed(2)} units`, cx * scale + vx, vy - cy * scale + 8, "11px 'DM Sans',sans-serif", "#ff4444");
         } else if (measurePts.length >= 2) {
           // Total distance at last point
           const last = measurePts[measurePts.length - 1];
           const totalDist = measurePolylineLength(measurePts);
-          haloText(`Total: ${totalDist.toFixed(2)} units`, last[0] * scale + vx + 20, last[1] * scale + vy - 20, "bold 12px 'DM Sans',sans-serif", "#ff4444");
+          haloText(`Total: ${totalDist.toFixed(2)} units`, last[0] * scale + vx + 20, vy - last[1] * scale - 20, "bold 12px 'DM Sans',sans-serif", "#ff4444");
         }
       }
 
@@ -1946,7 +1943,7 @@ export default function GridForgeGIS() {
         ctx.fillStyle = b.type === "outer" ? "rgba(249,115,22,0.08)" : "rgba(239,68,68,0.12)";
         ctx.beginPath();
         verts.forEach(([bx, by], vi) => {
-          const sx = bx * scale + vx, sy = by * scale + vy;
+          const sx = bx * scale + vx, sy = vy - by * scale;
           vi === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
         });
         ctx.closePath(); ctx.fill(); ctx.stroke();
@@ -1955,7 +1952,7 @@ export default function GridForgeGIS() {
         ctx.fillStyle = b.type === "outer" ? "#f97316" : "#ef4444";
         const bVr = editNodesMode ? 5 : 3;
         for (const [bx, by] of verts) {
-          const sx = bx * scale + vx, sy = by * scale + vy;
+          const sx = bx * scale + vx, sy = vy - by * scale;
           ctx.fillRect(sx - bVr, sy - bVr, bVr * 2, bVr * 2);
         }
         // Edit mode: midpoint "+" markers on edges
@@ -1965,7 +1962,7 @@ export default function GridForgeGIS() {
           for (let i = 0; i < verts.length; i++) {
             const j = (i + 1) % verts.length;
             const mx = (verts[i][0] + verts[j][0]) / 2 * scale + vx;
-            const my = (verts[i][1] + verts[j][1]) / 2 * scale + vy;
+            const my = vy - (verts[i][1] + verts[j][1]) / 2 * scale;
             ctx.beginPath(); ctx.moveTo(mx - 4, my); ctx.lineTo(mx + 4, my); ctx.stroke();
             ctx.beginPath(); ctx.moveTo(mx, my - 4); ctx.lineTo(mx, my + 4); ctx.stroke();
           }
@@ -1985,7 +1982,7 @@ export default function GridForgeGIS() {
           ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 2.5; ctx.setLineDash([8, 4]);
           ctx.beginPath();
           verts.forEach(([bx, by], vi) => {
-            const sx = bx * scale + vx, sy = by * scale + vy;
+            const sx = bx * scale + vx, sy = vy - by * scale;
             vi === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
           });
           ctx.stroke(); ctx.setLineDash([]);
@@ -1993,13 +1990,13 @@ export default function GridForgeGIS() {
           ctx.fillStyle = "#fbbf24";
           const pVr = editNodesMode ? 5 : 4;
           for (const v of verts) {
-            const sx = v[0] * scale + vx, sy = v[1] * scale + vy;
+            const sx = v[0] * scale + vx, sy = vy - v[1] * scale;
             ctx.fillRect(sx - pVr, sy - pVr, pVr * 2, pVr * 2);
           }
           // "PROX" label at midpoint
           if (verts.length >= 2) {
             const mi = Math.floor(verts.length / 2);
-            const msx = verts[mi][0] * scale + vx, msy = verts[mi][1] * scale + vy;
+            const msx = verts[mi][0] * scale + vx, msy = vy - verts[mi][1] * scale;
             ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
             ctx.fillStyle = "#fbbf24"; ctx.fillText("PROX", msx, msy - 10);
           }
@@ -2008,7 +2005,7 @@ export default function GridForgeGIS() {
             ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 1.5;
             for (let i = 0; i < verts.length - 1; i++) {
               const emx = (verts[i][0] + verts[i + 1][0]) / 2 * scale + vx;
-              const emy = (verts[i][1] + verts[i + 1][1]) / 2 * scale + vy;
+              const emy = vy - (verts[i][1] + verts[i + 1][1]) / 2 * scale;
               ctx.beginPath(); ctx.moveTo(emx - 4, emy); ctx.lineTo(emx + 4, emy); ctx.stroke();
               ctx.beginPath(); ctx.moveTo(emx, emy - 4); ctx.lineTo(emx, emy + 4); ctx.stroke();
             }
@@ -2018,14 +2015,14 @@ export default function GridForgeGIS() {
           ctx.strokeStyle = "#f472b6"; ctx.lineWidth = 4;
           ctx.beginPath();
           verts.forEach(([bx, by], vi) => {
-            const sx = bx * scale + vx, sy = by * scale + vy;
+            const sx = bx * scale + vx, sy = vy - by * scale;
             vi === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
           });
           ctx.stroke();
           ctx.strokeStyle = "#be185d"; ctx.lineWidth = 1.5;
           ctx.beginPath();
           verts.forEach(([bx, by], vi) => {
-            const sx = bx * scale + vx, sy = by * scale + vy;
+            const sx = bx * scale + vx, sy = vy - by * scale;
             vi === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
           });
           ctx.stroke();
@@ -2034,7 +2031,7 @@ export default function GridForgeGIS() {
           ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
           const wVr = editNodesMode ? 5 : 4;
           for (const v of verts) {
-            const sx = v[0] * scale + vx, sy = v[1] * scale + vy;
+            const sx = v[0] * scale + vx, sy = vy - v[1] * scale;
             ctx.fillRect(sx - wVr, sy - wVr, wVr * 2, wVr * 2);
             if (v[2] !== undefined && v[3] !== undefined) {
               const label = `${v[2].toFixed(1)}/${v[3].toFixed(1)}`;
@@ -2049,7 +2046,7 @@ export default function GridForgeGIS() {
             ctx.strokeStyle = "#f472b6"; ctx.lineWidth = 1.5;
             for (let i = 0; i < verts.length - 1; i++) {
               const emx = (verts[i][0] + verts[i + 1][0]) / 2 * scale + vx;
-              const emy = (verts[i][1] + verts[i + 1][1]) / 2 * scale + vy;
+              const emy = vy - (verts[i][1] + verts[i + 1][1]) / 2 * scale;
               ctx.beginPath(); ctx.moveTo(emx - 4, emy); ctx.lineTo(emx + 4, emy); ctx.stroke();
               ctx.beginPath(); ctx.moveTo(emx, emy - 4); ctx.lineTo(emx, emy + 4); ctx.stroke();
             }
@@ -2059,7 +2056,7 @@ export default function GridForgeGIS() {
           ctx.strokeStyle = "#00e5ff"; ctx.lineWidth = 2.5;
           ctx.beginPath();
           verts.forEach(([bx, by], vi) => {
-            const sx = bx * scale + vx, sy = by * scale + vy;
+            const sx = bx * scale + vx, sy = vy - by * scale;
             vi === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
           });
           ctx.stroke();
@@ -2067,7 +2064,7 @@ export default function GridForgeGIS() {
           ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
           const sVr = editNodesMode ? 5 : 4;
           for (const [bx, by, bz] of verts) {
-            const sx = bx * scale + vx, sy = by * scale + vy;
+            const sx = bx * scale + vx, sy = vy - by * scale;
             ctx.fillRect(sx - sVr, sy - sVr, sVr * 2, sVr * 2);
             if (bz !== undefined) {
               ctx.fillStyle = isDark ? "#ffffffcc" : "#000000bb";
@@ -2081,7 +2078,7 @@ export default function GridForgeGIS() {
             ctx.strokeStyle = "#00e5ff"; ctx.lineWidth = 1.5;
             for (let i = 0; i < verts.length - 1; i++) {
               const emx = (verts[i][0] + verts[i + 1][0]) / 2 * scale + vx;
-              const emy = (verts[i][1] + verts[i + 1][1]) / 2 * scale + vy;
+              const emy = vy - (verts[i][1] + verts[i + 1][1]) / 2 * scale;
               ctx.beginPath(); ctx.moveTo(emx - 4, emy); ctx.lineTo(emx + 4, emy); ctx.stroke();
               ctx.beginPath(); ctx.moveTo(emx, emy - 4); ctx.lineTo(emx, emy + 4); ctx.stroke();
             }
@@ -2105,9 +2102,9 @@ export default function GridForgeGIS() {
           const t = (avgZ - tinZMin) / tinRange;
           ctx.fillStyle = getColorFromRamp(Math.min(1, t * 0.8 + 0.1), activeColorRamp);
           ctx.beginPath();
-          ctx.moveTo(tri.v0.x * scale + vx, tri.v0.y * scale + vy);
-          ctx.lineTo(tri.v1.x * scale + vx, tri.v1.y * scale + vy);
-          ctx.lineTo(tri.v2.x * scale + vx, tri.v2.y * scale + vy);
+          ctx.moveTo(tri.v0.x * scale + vx, vy - tri.v0.y * scale);
+          ctx.lineTo(tri.v1.x * scale + vx, vy - tri.v1.y * scale);
+          ctx.lineTo(tri.v2.x * scale + vx, vy - tri.v2.y * scale);
           ctx.closePath();
           if (tri.locked) { ctx.fillStyle = "rgba(255,200,0,0.15)"; }
           ctx.fill();
@@ -2118,8 +2115,8 @@ export default function GridForgeGIS() {
         ctx.lineWidth = 0.5;
         for (const [a, b] of edges) {
           const va = tinMesh.vertices[a], vb = tinMesh.vertices[b];
-          const sx1 = va.x * scale + vx, sy1 = va.y * scale + vy;
-          const sx2 = vb.x * scale + vx, sy2 = vb.y * scale + vy;
+          const sx1 = va.x * scale + vx, sy1 = vy - va.y * scale;
+          const sx2 = vb.x * scale + vx, sy2 = vy - vb.y * scale;
           // Skip off-screen edges
           if (sx1 < -50 && sx2 < -50) continue;
           if (sx1 > w + 50 && sx2 > w + 50) continue;
@@ -2142,9 +2139,9 @@ export default function GridForgeGIS() {
               ctx.fillStyle = "rgba(59,130,246,0.35)";
               ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 2;
               ctx.beginPath();
-              ctx.moveTo(v0.x * scale + vx, v0.y * scale + vy);
-              ctx.lineTo(v1.x * scale + vx, v1.y * scale + vy);
-              ctx.lineTo(v2.x * scale + vx, v2.y * scale + vy);
+              ctx.moveTo(v0.x * scale + vx, vy - v0.y * scale);
+              ctx.lineTo(v1.x * scale + vx, vy - v1.y * scale);
+              ctx.lineTo(v2.x * scale + vx, vy - v2.y * scale);
               ctx.closePath(); ctx.fill(); ctx.stroke();
             }
           } else if (tinSelection.type === "edge" && tinSelection.edgeVerts) {
@@ -2152,8 +2149,8 @@ export default function GridForgeGIS() {
             const va = tinMesh.vertices[ea], vb = tinMesh.vertices[eb];
             ctx.strokeStyle = "#3b82f6"; ctx.lineWidth = 3;
             ctx.beginPath();
-            ctx.moveTo(va.x * scale + vx, va.y * scale + vy);
-            ctx.lineTo(vb.x * scale + vx, vb.y * scale + vy);
+            ctx.moveTo(va.x * scale + vx, vy - va.y * scale);
+            ctx.lineTo(vb.x * scale + vx, vy - vb.y * scale);
             ctx.stroke();
             // Show swap preview
             if (tinSelection.preview) {
@@ -2161,8 +2158,8 @@ export default function GridForgeGIS() {
               const na = tinMesh.vertices[pv.newEdge[0]], nb = tinMesh.vertices[pv.newEdge[1]];
               ctx.strokeStyle = "#22c55e"; ctx.lineWidth = 2; ctx.setLineDash([6, 3]);
               ctx.beginPath();
-              ctx.moveTo(na.x * scale + vx, na.y * scale + vy);
-              ctx.lineTo(nb.x * scale + vx, nb.y * scale + vy);
+              ctx.moveTo(na.x * scale + vx, vy - na.y * scale);
+              ctx.lineTo(nb.x * scale + vx, vy - nb.y * scale);
               ctx.stroke(); ctx.setLineDash([]);
             }
           } else if (tinSelection.type === "vertex") {
@@ -2170,15 +2167,15 @@ export default function GridForgeGIS() {
             if (v) {
               ctx.fillStyle = "#3b82f6"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 2;
               ctx.beginPath();
-              ctx.arc(v.x * scale + vx, v.y * scale + vy, 6, 0, Math.PI * 2);
+              ctx.arc(v.x * scale + vx, vy - v.y * scale, 6, 0, Math.PI * 2);
               ctx.fill(); ctx.stroke();
               // Show Z label
               ctx.font = "bold 11px 'JetBrains Mono',monospace";
               ctx.textAlign = "center";
               ctx.fillStyle = "#fff";
               ctx.strokeStyle = "#000"; ctx.lineWidth = 3;
-              ctx.strokeText(`Z: ${v.z.toFixed(2)}`, v.x * scale + vx, v.y * scale + vy - 12);
-              ctx.fillText(`Z: ${v.z.toFixed(2)}`, v.x * scale + vx, v.y * scale + vy - 12);
+              ctx.strokeText(`Z: ${v.z.toFixed(2)}`, v.x * scale + vx, vy - v.y * scale - 12);
+              ctx.fillText(`Z: ${v.z.toFixed(2)}`, v.x * scale + vx, vy - v.y * scale - 12);
             }
           }
         }
@@ -2195,14 +2192,14 @@ export default function GridForgeGIS() {
         if (isBoundary) ctx.setLineDash([6, 4]);
         ctx.beginPath();
         drawPts.forEach((pt, pi) => {
-          const sx = pt[0] * scale + vx, sy = pt[1] * scale + vy;
+          const sx = pt[0] * scale + vx, sy = vy - pt[1] * scale;
           pi === 0 ? ctx.moveTo(sx, sy) : ctx.lineTo(sx, sy);
         });
         ctx.stroke();
         ctx.setLineDash([]);
         ctx.fillStyle = previewColor;
         for (const pt of drawPts) {
-          const sx = pt[0] * scale + vx, sy = pt[1] * scale + vy;
+          const sx = pt[0] * scale + vx, sy = vy - pt[1] * scale;
           ctx.fillRect(sx - 3, sy - 3, 6, 6);
         }
         ctx.restore();
@@ -2263,7 +2260,7 @@ export default function GridForgeGIS() {
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
       const sx = p.x * viewState.scale + viewState.x;
-      const sy = p.y * viewState.scale + viewState.y;
+      const sy = viewState.y - p.y * viewState.scale;
       const d = Math.sqrt((sx - screenX) ** 2 + (sy - screenY) ** 2);
       if (d < closestDist) { closest = { x: p.x, y: p.y, z: p.z, screenX: sx, screenY: sy }; closestDist = d; }
     }
@@ -2275,8 +2272,8 @@ export default function GridForgeGIS() {
     const hitRadius = 8;
     let best = null, bestDist = hitRadius;
     const testEdge = (type, id, v0, v1, segIdx) => {
-      const ax = v0[0] * viewState.scale + viewState.x, ay = v0[1] * viewState.scale + viewState.y;
-      const bx = v1[0] * viewState.scale + viewState.x, by = v1[1] * viewState.scale + viewState.y;
+      const ax = v0[0] * viewState.scale + viewState.x, ay = viewState.y - v0[1] * viewState.scale;
+      const bx = v1[0] * viewState.scale + viewState.x, by = viewState.y - v1[1] * viewState.scale;
       const dx = bx - ax, dy = by - ay;
       const lenSq = dx * dx + dy * dy;
       if (lenSq === 0) return;
@@ -2309,7 +2306,7 @@ export default function GridForgeGIS() {
       pushHistory();
       const rect = canvasRef.current.getBoundingClientRect();
       let mx = (e.clientX - rect.left - viewState.x) / viewState.scale;
-      let my = (e.clientY - rect.top - viewState.y) / viewState.scale;
+      let my = (viewState.y - (e.clientY - rect.top)) / viewState.scale;
       const snap = snapEnabled ? snapPointRef.current : null;
       if (snap) { mx = snap.x; my = snap.y; }
 
@@ -2359,7 +2356,7 @@ export default function GridForgeGIS() {
     if (measureMode) {
       const rect = canvasRef.current.getBoundingClientRect();
       const mx = (e.clientX - rect.left - viewState.x) / viewState.scale;
-      const my = (e.clientY - rect.top - viewState.y) / viewState.scale;
+      const my = (viewState.y - (e.clientY - rect.top)) / viewState.scale;
       setMeasurePts(prev => [...prev, [mx, my]]);
       return;
     }
@@ -2373,7 +2370,7 @@ export default function GridForgeGIS() {
       for (const b of boundaries) {
         for (let vi = 0; vi < b.vertices.length; vi++) {
           const sx = b.vertices[vi][0] * viewState.scale + viewState.x;
-          const sy = b.vertices[vi][1] * viewState.scale + viewState.y;
+          const sy = viewState.y - b.vertices[vi][1] * viewState.scale;
           const d = Math.sqrt((sx - screenX) ** 2 + (sy - screenY) ** 2);
           if (d < bestDist) { bestDist = d; bestHit = { type: "boundary", id: b.id, vertexIdx: vi }; }
         }
@@ -2382,7 +2379,7 @@ export default function GridForgeGIS() {
       for (const bl of breaklines) {
         for (let vi = 0; vi < bl.vertices.length; vi++) {
           const sx = bl.vertices[vi][0] * viewState.scale + viewState.x;
-          const sy = bl.vertices[vi][1] * viewState.scale + viewState.y;
+          const sy = viewState.y - bl.vertices[vi][1] * viewState.scale;
           const d = Math.sqrt((sx - screenX) ** 2 + (sy - screenY) ** 2);
           if (d < bestDist) { bestDist = d; bestHit = { type: "breakline", id: bl.id, vertexIdx: vi }; }
         }
@@ -2398,7 +2395,7 @@ export default function GridForgeGIS() {
         if (edgeHit) {
           pushHistory();
           const mx = (e.clientX - canvasRef.current.getBoundingClientRect().left - viewState.x) / viewState.scale;
-          const my = (e.clientY - canvasRef.current.getBoundingClientRect().top - viewState.y) / viewState.scale;
+          const my = (viewState.y - (e.clientY - canvasRef.current.getBoundingClientRect().top)) / viewState.scale;
           if (edgeHit.type === "boundary") {
             setBoundaries(prev => prev.map(b => {
               if (b.id !== edgeHit.id) return b;
@@ -2437,7 +2434,7 @@ export default function GridForgeGIS() {
     if (e.altKey && !drawMode && !tinEditMode) {
       const rect = canvasRef.current.getBoundingClientRect();
       const mx = (e.clientX - rect.left - viewState.x) / viewState.scale;
-      const my = (e.clientY - rect.top - viewState.y) / viewState.scale;
+      const my = (viewState.y - (e.clientY - rect.top)) / viewState.scale;
       setLassoPts(prev => [...prev, { x: mx, y: my }]);
       return;
     }
@@ -2453,7 +2450,7 @@ export default function GridForgeGIS() {
     if (rect) {
       lastMouseRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
       const mx = (e.clientX - rect.left - viewState.x) / viewState.scale;
-      const my = (e.clientY - rect.top - viewState.y) / viewState.scale;
+      const my = (viewState.y - (e.clientY - rect.top)) / viewState.scale;
       cursorCoordsRef.current = { x: mx.toFixed(2), y: my.toFixed(2) };
       if (coordsContainerRef.current) coordsContainerRef.current.style.display = 'flex';
       if (coordsXRef.current) coordsXRef.current.textContent = mx.toFixed(2);
@@ -2496,7 +2493,7 @@ export default function GridForgeGIS() {
     // Node editing drag
     if (nodeEditRef.current.dragging && rect) {
       const mx = (e.clientX - rect.left - viewState.x) / viewState.scale;
-      const my = (e.clientY - rect.top - viewState.y) / viewState.scale;
+      const my = (viewState.y - (e.clientY - rect.top)) / viewState.scale;
       const { type, id, vertexIdx } = nodeEditRef.current;
       if (type === "boundary") {
         setBoundaries(prev => prev.map(b => {
@@ -2537,7 +2534,7 @@ export default function GridForgeGIS() {
       const y1 = Math.min(selectionBox.y1, selectionBox.y2), y2 = Math.max(selectionBox.y1, selectionBox.y2);
       const sel = new Set();
       points.forEach((p, i) => {
-        const sx = p.x * sc + vx, sy = p.y * sc + vy;
+        const sx = p.x * sc + vx, sy = vy - p.y * sc;
         if (sx >= x1 && sx <= x2 && sy >= y1 && sy <= y2) sel.add(i);
       });
       setSelectedPts(sel);
@@ -2553,7 +2550,7 @@ export default function GridForgeGIS() {
       const rect = canvasRef.current.getBoundingClientRect();
       const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
       const worldX = (cx - viewState.x) / viewState.scale;
-      const worldY = (cy - viewState.y) / viewState.scale;
+      const worldY = (viewState.y - cy) / viewState.scale;
       const tol = 10 / viewState.scale; // 10px tolerance in world coords
 
       if (tinEditMode === "select") {
@@ -2643,7 +2640,7 @@ export default function GridForgeGIS() {
     const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
     let closest = -1, closestDist = 20;
     points.forEach((p, i) => {
-      const sx = p.x * viewState.scale + viewState.x, sy = p.y * viewState.scale + viewState.y;
+      const sx = p.x * viewState.scale + viewState.x, sy = viewState.y - p.y * viewState.scale;
       const d = Math.sqrt((sx - cx) ** 2 + (sy - cy) ** 2);
       if (d < closestDist) { closest = i; closestDist = d; }
     });
@@ -2695,7 +2692,7 @@ export default function GridForgeGIS() {
     for (const b of boundaries) {
       for (let vi = 0; vi < b.vertices.length; vi++) {
         const sx = b.vertices[vi][0] * viewState.scale + viewState.x;
-        const sy = b.vertices[vi][1] * viewState.scale + viewState.y;
+        const sy = viewState.y - b.vertices[vi][1] * viewState.scale;
         const d = Math.sqrt((sx - screenX) ** 2 + (sy - screenY) ** 2);
         if (d < bestDist) { bestDist = d; bestHit = { type: "boundary", id: b.id, vertexIdx: vi, count: b.vertices.length }; }
       }
@@ -2703,7 +2700,7 @@ export default function GridForgeGIS() {
     for (const bl of breaklines) {
       for (let vi = 0; vi < bl.vertices.length; vi++) {
         const sx = bl.vertices[vi][0] * viewState.scale + viewState.x;
-        const sy = bl.vertices[vi][1] * viewState.scale + viewState.y;
+        const sy = viewState.y - bl.vertices[vi][1] * viewState.scale;
         const d = Math.sqrt((sx - screenX) ** 2 + (sy - screenY) ** 2);
         if (d < bestDist) { bestDist = d; bestHit = { type: "breakline", id: bl.id, vertexIdx: vi, count: bl.vertices.length }; }
       }
