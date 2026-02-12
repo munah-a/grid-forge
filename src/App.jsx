@@ -251,6 +251,7 @@ export default function GridForgeGIS() {
   // cursorCoords uses refs to avoid re-renders on every mouse move
   const [showTable, setShowTable] = useState(false);
   const [baseMap, setBaseMap] = useState("none");
+  const [baseMapOpacity, setBaseMapOpacity] = useState(100);
   const [showBaseMapPicker, setShowBaseMapPicker] = useState(false);
   const [showCompass, setShowCompass] = useState(true);
   const [showGridLines, setShowGridLines] = useState(true);
@@ -1310,6 +1311,8 @@ export default function GridForgeGIS() {
       // ── Normal 2D Rendering ────────────────────────────────────────────────
       // Tile basemap (OSM / Satellite)
       if ((baseMap === "osm" || baseMap === "satellite") && projectCRS !== "LOCAL") {
+        const prevAlpha = ctx.globalAlpha;
+        ctx.globalAlpha = baseMapOpacity / 100;
         const tileUrlFn = baseMap === "osm"
           ? (tz, tx, ty) => `https://tile.openstreetmap.org/${tz}/${tx}/${ty}.png`
           : (tz, tx, ty) => `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/${tz}/${ty}/${tx}`;
@@ -1429,6 +1432,7 @@ export default function GridForgeGIS() {
             for (let i = 0; i < keys.length - 400; i++) cache.delete(keys[i]);
           }
         }
+        ctx.globalAlpha = prevAlpha;
       }
 
       // Show hint when basemap can't align (LOCAL CRS)
@@ -2251,7 +2255,7 @@ export default function GridForgeGIS() {
       }
     }); // end requestAnimationFrame
     return () => { if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); };
-  }, [points, gridData, contourData, filledContourData, hillshadeData, viewState, layers, bounds, baseMap, showGridLines, showCoordLabels, showCompass, viewMode, view3D, compMode, selectedPts, selectionBox, measurePts, measureMode, isDark, tileGen, boundaries, breaklines, drawPts, drawMode, isSnapped, projectCRS, isGeographic, editNodesMode, activeColorRamp, effectiveZRange, colorLUT, hiddenDescs, lassoPts]);
+  }, [points, gridData, contourData, filledContourData, hillshadeData, viewState, layers, bounds, baseMap, baseMapOpacity, showGridLines, showCoordLabels, showCompass, viewMode, view3D, compMode, selectedPts, selectionBox, measurePts, measureMode, isDark, tileGen, boundaries, breaklines, drawPts, drawMode, isSnapped, projectCRS, isGeographic, editNodesMode, activeColorRamp, effectiveZRange, colorLUT, hiddenDescs, lassoPts]);
 
   // ── Snap helper ────────────────────────────────────────────────────────────
   const findSnapPoint = (screenX, screenY) => {
@@ -2821,6 +2825,8 @@ export default function GridForgeGIS() {
     setPoints(pts);
     setAllRows(pts);
     setHeaders(["x", "y", "z"]);
+    setProjectCRS("LOCAL"); // sample data has no real-world CRS
+    setBaseMap("none");     // prevent tile loading for arbitrary coords
     setLayers([{ id: Date.now(), name: "Sample Points (500)", type: "points", visible: true, opacity: 100, size: 5, shape: "circle", color: C.accent, colorMode: "ramp", showPointNumbers: false, showPointLevels: false, showPointDescs: false, labelSize: 9 }]);
     setActivePanel("gridding");
   };
@@ -4130,12 +4136,23 @@ export default function GridForgeGIS() {
             {showBaseMapPicker && <div style={{ background: C.panel + "f5", border: `1px solid ${C.panelBorder}`, borderTop: "none", borderRadius: "0 8px 8px 8px", padding: 10, backdropFilter: "blur(12px)", minWidth: 280 }}>
               <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 6, marginBottom: 10 }}>
                 {[{ id: "none", l: "None", c: ["#0a0f1e", "#0d1528", "#1a2340"] }, { id: "satellite", l: "Aerial", c: ["#1a3a1a", "#2a5230", "#1a2e1a"] }, { id: "osm", l: "OSM", c: ["#f0ead6", "#aad3df", "#c8d7a3"] }].map(bm =>
-                  <button key={bm.id} onClick={() => setBaseMap(bm.id)} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: "pointer", border: `2px solid ${baseMap === bm.id ? C.accent : "transparent"}`, borderRadius: 8, padding: 3, background: "transparent" }}>
+                  <button key={bm.id} onClick={() => {
+                    if (bm.id !== "none" && projectCRS === "LOCAL") { alert("Base map tiles require a geographic or projected CRS.\nSet a CRS first (e.g. EPSG:4326 or a UTM zone) to align tiles with your data."); return; }
+                    setBaseMap(bm.id);
+                  }} style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, cursor: "pointer", border: `2px solid ${baseMap === bm.id ? C.accent : "transparent"}`, borderRadius: 8, padding: 3, background: "transparent", opacity: bm.id !== "none" && projectCRS === "LOCAL" ? 0.4 : 1 }}>
                     <div style={{ width: 44, height: 32, borderRadius: 4, background: `linear-gradient(135deg,${bm.c.join(",")})` }} />
                     <span style={{ fontSize: 9, color: baseMap === bm.id ? C.accent : C.textMuted, fontWeight: baseMap === bm.id ? 600 : 400 }}>{bm.l}</span>
                   </button>
                 )}
               </div>
+              {projectCRS === "LOCAL" && <div style={{ fontSize: 9, color: C.textDim, padding: "4px 2px 0" }}>Set a CRS to enable map tiles</div>}
+              {baseMap !== "none" && <div style={{ borderTop: `1px solid ${C.panelBorder}`, paddingTop: 8, marginBottom: 6 }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 4 }}>
+                  <span style={{ fontSize: 9, color: C.textDim, textTransform: "uppercase", letterSpacing: 1, fontWeight: 600 }}>Opacity</span>
+                  <span style={{ fontSize: 10, color: C.textMuted, fontFamily: "'JetBrains Mono',monospace" }}>{baseMapOpacity}%</span>
+                </div>
+                <input type="range" min={0} max={100} value={baseMapOpacity} onChange={e => setBaseMapOpacity(+e.target.value)} style={{ width: "100%", accentColor: C.accent, height: 4, cursor: "pointer" }} />
+              </div>}
               <div style={{ borderTop: `1px solid ${C.panelBorder}`, paddingTop: 8, display: "flex", flexDirection: "column", gap: 2 }}>
                 <span style={{ fontSize: 9, color: C.textDim, textTransform: "uppercase", letterSpacing: 1, marginBottom: 2, fontWeight: 600 }}>Overlays</span>
                 {[{ s: showGridLines, set: setShowGridLines, l: "Grid Lines" }, { s: showCoordLabels, set: setShowCoordLabels, l: "Coord Labels" }, { s: showCompass, set: setShowCompass, l: "Compass" }].map(t =>
