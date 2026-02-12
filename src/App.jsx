@@ -293,6 +293,7 @@ export default function GridForgeGIS() {
   const [viewMode, setViewMode] = useState("2d");
   const [view3D, setView3D] = useState({ angleX: 30, angleZ: 45, exaggeration: 2 });
   const [compMode, setCompMode] = useState(null); // null or { algos: [], results: [] }
+  const [compGrid, setCompGrid] = useState(null); // comparison grid for grid math
   const [measureMode, setMeasureMode] = useState(null);
   const [measurePts, setMeasurePts] = useState([]);
   const [boundaries, setBoundaries] = useState([]);
