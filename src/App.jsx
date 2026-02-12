@@ -25,7 +25,7 @@ const APP_VERSION = "1.0.0-rc.9";
 // ─── Theme Colors ─────────────────────────────────────────────────────────────
 const C = {
   bg: "#0a0f1e", panel: "#0f1629", panelBorder: "#1a2340", surface: "#141c33",
-  surfaceHover: "#1a2545", text: "#e2e8f0", textMuted: "#64748b", textDim: "#475569",
+  surfaceHover: "#1a2545", text: "#e2e8f0", textMuted: "#8494a7", textDim: "#5a6d81",
   accent: "#f97316", accentDim: "#c2410c", blue: "#1e40af", blueLight: "#3b82f6",
   green: "#22c55e", greenDim: "#166534", danger: "#ef4444", white: "#ffffff",
 };
@@ -101,6 +101,7 @@ const I = {
   Undo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>,
   Redo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10" /></svg>,
   HelpCircle: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>,
+  Edit: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>,
 };
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -128,11 +129,11 @@ function Sld({ value, onChange, min, max, step = 1, label, showValue = true }) {
     </div>
   );
 }
-function Btn({ children, onClick, variant = "default", size = "md", style, disabled, title }) {
+function Btn({ children, onClick, variant = "default", size = "md", style, disabled, title, ...rest }) {
   const base = { display: "inline-flex", alignItems: "center", gap: 6, cursor: disabled ? "not-allowed" : "pointer", border: "none", borderRadius: 6, fontWeight: 500, transition: "all 0.15s", opacity: disabled ? 0.5 : 1, fontFamily: "inherit" };
   const variants = { default: { background: C.surface, color: C.text, border: `1px solid ${C.panelBorder}` }, primary: { background: C.accent, color: "#fff" }, success: { background: C.green, color: "#fff" }, ghost: { background: "transparent", color: C.textMuted }, danger: { background: "transparent", color: C.danger, border: `1px solid ${C.danger}33` } };
   const sizes = { sm: { padding: "4px 10px", fontSize: 11 }, md: { padding: "7px 14px", fontSize: 12 }, lg: { padding: "10px 20px", fontSize: 13 } };
-  return <button onClick={onClick} disabled={disabled} title={title} style={{ ...base, ...variants[variant], ...sizes[size], ...style }}>{children}</button>;
+  return <button onClick={onClick} disabled={disabled} title={title} style={{ ...base, ...variants[variant], ...sizes[size], ...style }} {...rest}>{children}</button>;
 }
 const Label = ({ children }) => <label style={{ fontSize: 11, color: C.textMuted, marginBottom: 4, display: "block", fontWeight: 600 }}>{children}</label>;
 const Section = ({ children, title }) => <div style={{ marginBottom: 12 }}>{title && <Label>{title}</Label>}{children}</div>;
@@ -286,6 +287,7 @@ export default function GridForgeGIS() {
   const [pendingZ, setPendingZ] = useState(null); // { x, y, wallMode?, zTop? } awaiting Z input
   const [zInputValue, setZInputValue] = useState("");
   const [zInputValue2, setZInputValue2] = useState(""); // wall breakline bottom Z
+  const [editNodesMode, setEditNodesMode] = useState(false);
   const [snapEnabled, setSnapEnabled] = useState(true);
   const [isSnapped, setIsSnapped] = useState(false);
   const [selectedPts, setSelectedPts] = useState(new Set());
@@ -313,6 +315,12 @@ export default function GridForgeGIS() {
   const pointSpriteCache = useRef(new Map());
   const snapPointRef = useRef(null); // { x, y, z, screenX, screenY }
   const [tileGen, setTileGen] = useState(0);
+
+  // ── Cleanup timers and workers on unmount ──────────────────────────────
+  useEffect(() => () => {
+    if (tileLoadTimerRef.current) clearTimeout(tileLoadTimerRef.current);
+    if (workerRef.current) { workerRef.current.terminate(); workerRef.current = null; }
+  }, []);
 
   // ── Undo / Redo ──────────────────────────────────────────────────────────
   const MAX_HISTORY = 50;
@@ -456,9 +464,11 @@ export default function GridForgeGIS() {
       if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
       if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); redo(); return; }
       if ((e.ctrlKey || e.metaKey) && e.key === "Z") { e.preventDefault(); redo(); return; }
-      if (e.key === "Escape" && drawMode) {
-        setDrawMode(null); setDrawPts([]); setPendingZ(null); setZInputValue(""); setZInputValue2("");
-        snapPointRef.current = null; setIsSnapped(false);
+      if (e.key === "Escape") {
+        if (showCRSPrompt) { setShowCRSPrompt(false); return; }
+        if (showBugReport) { setBugTitle(""); setBugDesc(""); setShowBugReport(false); return; }
+        if (editNodesMode) { setEditNodesMode(false); return; }
+        if (drawMode) { setDrawMode(null); setDrawPts([]); setPendingZ(null); setZInputValue(""); setZInputValue2(""); snapPointRef.current = null; setIsSnapped(false); }
       }
       if (e.key === "s" || e.key === "S") {
         if (e.target.tagName === "INPUT" || e.target.tagName === "TEXTAREA" || e.target.tagName === "SELECT") return;
@@ -471,7 +481,7 @@ export default function GridForgeGIS() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [drawMode, deleteSelectedPoints, undo, redo]);
+  }, [drawMode, deleteSelectedPoints, undo, redo, showCRSPrompt, showBugReport, editNodesMode]);
 
   // ── Offscreen raster cache (ImageData-based) ───────────────────────────────
   useEffect(() => {
@@ -543,6 +553,10 @@ export default function GridForgeGIS() {
 
   const handleFile = useCallback((file) => {
     if (!file) return;
+    const MAX_SIZE = 50 * 1024 * 1024; // 50MB
+    const WARN_SIZE = 10 * 1024 * 1024; // 10MB
+    if (file.size > MAX_SIZE) { alert(`File too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 50 MB.`); return; }
+    if (file.size > WARN_SIZE && !confirm(`File is ${(file.size / 1024 / 1024).toFixed(1)} MB. Large files may slow down the browser. Continue?`)) return;
     setFileName(file.name);
     const reader = new FileReader();
     reader.onload = (e) => {
@@ -588,7 +602,7 @@ export default function GridForgeGIS() {
       z: columnMapping.z ? +r[columnMapping.z] : 0,
       pointNo: columnMapping.pointNo ? (r[columnMapping.pointNo] || "") : "",
       desc: columnMapping.desc ? (r[columnMapping.desc] || "") : "",
-    })).filter(p => !isNaN(p.x) && !isNaN(p.y) && !isNaN(p.z));
+    })).filter(p => Number.isFinite(p.x) && Number.isFinite(p.y) && Number.isFinite(p.z));
     // Transform coordinates if file CRS differs from project CRS
     if (fileCRS !== "LOCAL" && projectCRS !== "LOCAL" && fileCRS !== projectCRS) {
       pts = transformPoints(pts, fileCRS, projectCRS);
@@ -688,6 +702,8 @@ export default function GridForgeGIS() {
 
   const loadProject = (file) => {
     if (!file) return;
+    const MAX_PROJECT_SIZE = 100 * 1024 * 1024; // 100MB
+    if (file.size > MAX_PROJECT_SIZE) { alert(`Project file too large (${(file.size / 1024 / 1024).toFixed(1)} MB). Maximum is 100 MB.`); return; }
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
@@ -820,17 +836,36 @@ export default function GridForgeGIS() {
           quads.push({ corners, avgDepth, avgVal: corners.reduce((s, c) => s + (isNaN(c.val) ? 0 : c.val), 0) / 4 });
         }
         quads.sort((a, b) => a.avgDepth - b.avgDepth);
+        // Batch quads by quantized color to reduce canvas calls
+        const depthRange = (quads[quads.length - 1]?.avgDepth - quads[0]?.avgDepth) || 1;
+        const depthMin = quads[0]?.avgDepth || 0;
+        const colorBatches = new Map();
         for (const q of quads) {
           const t = (q.avgVal - zMin) / range;
           const [cr, cg, cb] = getColorComponents(Math.max(0, Math.min(1, t)), gs.colorRamp);
-          // Simple shading based on depth
-          const shade = 0.5 + 0.5 * (q.avgDepth - quads[0].avgDepth) / ((quads[quads.length - 1]?.avgDepth - quads[0]?.avgDepth) || 1);
-          ctx.fillStyle = `rgb(${Math.round(cr * shade)},${Math.round(cg * shade)},${Math.round(cb * shade)})`;
-          ctx.beginPath();
-          q.corners.forEach((c, ci) => { const px = w / 2 + c.sx * sc, py = h / 2 + c.sy * sc; ci === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); });
-          ctx.closePath(); ctx.fill();
-          ctx.strokeStyle = `rgba(0,0,0,0.1)`; ctx.lineWidth = 0.3; ctx.stroke();
+          const shade = 0.5 + 0.5 * (q.avgDepth - depthMin) / depthRange;
+          const r = Math.round(cr * shade), g = Math.round(cg * shade), b = Math.round(cb * shade);
+          const key = `${r},${g},${b}`;
+          if (!colorBatches.has(key)) colorBatches.set(key, []);
+          colorBatches.get(key).push(q);
         }
+        for (const [color, batch] of colorBatches) {
+          ctx.fillStyle = `rgb(${color})`;
+          ctx.beginPath();
+          for (const q of batch) {
+            q.corners.forEach((c, ci) => { const px = w / 2 + c.sx * sc, py = h / 2 + c.sy * sc; ci === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); });
+            ctx.closePath();
+          }
+          ctx.fill();
+        }
+        // Single stroke pass for grid lines
+        ctx.strokeStyle = `rgba(0,0,0,0.1)`; ctx.lineWidth = 0.3;
+        ctx.beginPath();
+        for (const q of quads) {
+          q.corners.forEach((c, ci) => { const px = w / 2 + c.sx * sc, py = h / 2 + c.sy * sc; ci === 0 ? ctx.moveTo(px, py) : ctx.lineTo(px, py); });
+          ctx.closePath();
+        }
+        ctx.stroke();
         // 3D info
         ctx.fillStyle = isDark ? "#ffffffaa" : "#000000aa"; ctx.font = "12px 'DM Sans',sans-serif"; ctx.textAlign = "left";
         ctx.fillText(`3D View — Angle: ${view3D.angleX}°/${view3D.angleZ}° — Exag: ${view3D.exaggeration}×`, 12, 24);
@@ -1268,9 +1303,22 @@ export default function GridForgeGIS() {
         // Vertex markers
         ctx.setLineDash([]);
         ctx.fillStyle = b.type === "outer" ? "#f97316" : "#ef4444";
+        const bVr = editNodesMode ? 5 : 3;
         for (const [bx, by] of verts) {
           const sx = bx * scale + vx, sy = by * scale + vy;
-          ctx.fillRect(sx - 3, sy - 3, 6, 6);
+          ctx.fillRect(sx - bVr, sy - bVr, bVr * 2, bVr * 2);
+        }
+        // Edit mode: midpoint "+" markers on edges
+        if (editNodesMode) {
+          ctx.strokeStyle = b.type === "outer" ? "#f97316" : "#ef4444";
+          ctx.lineWidth = 1.5;
+          for (let i = 0; i < verts.length; i++) {
+            const j = (i + 1) % verts.length;
+            const mx = (verts[i][0] + verts[j][0]) / 2 * scale + vx;
+            const my = (verts[i][1] + verts[j][1]) / 2 * scale + vy;
+            ctx.beginPath(); ctx.moveTo(mx - 4, my); ctx.lineTo(mx + 4, my); ctx.stroke();
+            ctx.beginPath(); ctx.moveTo(mx, my - 4); ctx.lineTo(mx, my + 4); ctx.stroke();
+          }
         }
         ctx.restore();
       }
@@ -1292,9 +1340,10 @@ export default function GridForgeGIS() {
           ctx.stroke(); ctx.setLineDash([]);
           // Vertex markers
           ctx.fillStyle = "#fbbf24";
+          const pVr = editNodesMode ? 5 : 4;
           for (const v of verts) {
             const sx = v[0] * scale + vx, sy = v[1] * scale + vy;
-            ctx.fillRect(sx - 4, sy - 4, 8, 8);
+            ctx.fillRect(sx - pVr, sy - pVr, pVr * 2, pVr * 2);
           }
           // "PROX" label at midpoint
           if (verts.length >= 2) {
@@ -1302,6 +1351,16 @@ export default function GridForgeGIS() {
             const msx = verts[mi][0] * scale + vx, msy = verts[mi][1] * scale + vy;
             ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
             ctx.fillStyle = "#fbbf24"; ctx.fillText("PROX", msx, msy - 10);
+          }
+          // Edit mode: midpoint "+" markers
+          if (editNodesMode) {
+            ctx.strokeStyle = "#fbbf24"; ctx.lineWidth = 1.5;
+            for (let i = 0; i < verts.length - 1; i++) {
+              const emx = (verts[i][0] + verts[i+1][0]) / 2 * scale + vx;
+              const emy = (verts[i][1] + verts[i+1][1]) / 2 * scale + vy;
+              ctx.beginPath(); ctx.moveTo(emx - 4, emy); ctx.lineTo(emx + 4, emy); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(emx, emy - 4); ctx.lineTo(emx, emy + 4); ctx.stroke();
+            }
           }
         } else if (bType === "wall") {
           // Thick double magenta/pink line
@@ -1322,15 +1381,26 @@ export default function GridForgeGIS() {
           // Vertex markers with dual Z labels
           ctx.fillStyle = "#f472b6";
           ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
+          const wVr = editNodesMode ? 5 : 4;
           for (const v of verts) {
             const sx = v[0] * scale + vx, sy = v[1] * scale + vy;
-            ctx.fillRect(sx - 4, sy - 4, 8, 8);
+            ctx.fillRect(sx - wVr, sy - wVr, wVr * 2, wVr * 2);
             if (v[2] !== undefined && v[3] !== undefined) {
               const label = `${v[2].toFixed(1)}/${v[3].toFixed(1)}`;
               ctx.fillStyle = isDark ? "#ffffffcc" : "#000000bb";
               ctx.strokeStyle = isDark ? "#000000aa" : "#ffffffaa"; ctx.lineWidth = 2;
               ctx.strokeText(label, sx, sy - 10); ctx.fillText(label, sx, sy - 10);
               ctx.fillStyle = "#f472b6"; ctx.lineWidth = 4;
+            }
+          }
+          // Edit mode: midpoint "+" markers
+          if (editNodesMode) {
+            ctx.strokeStyle = "#f472b6"; ctx.lineWidth = 1.5;
+            for (let i = 0; i < verts.length - 1; i++) {
+              const emx = (verts[i][0] + verts[i+1][0]) / 2 * scale + vx;
+              const emy = (verts[i][1] + verts[i+1][1]) / 2 * scale + vy;
+              ctx.beginPath(); ctx.moveTo(emx - 4, emy); ctx.lineTo(emx + 4, emy); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(emx, emy - 4); ctx.lineTo(emx, emy + 4); ctx.stroke();
             }
           }
         } else {
@@ -1344,14 +1414,25 @@ export default function GridForgeGIS() {
           ctx.stroke();
           ctx.fillStyle = "#00e5ff";
           ctx.font = "bold 9px 'JetBrains Mono',monospace"; ctx.textAlign = "center";
+          const sVr = editNodesMode ? 5 : 4;
           for (const [bx, by, bz] of verts) {
             const sx = bx * scale + vx, sy = by * scale + vy;
-            ctx.fillRect(sx - 4, sy - 4, 8, 8);
+            ctx.fillRect(sx - sVr, sy - sVr, sVr * 2, sVr * 2);
             if (bz !== undefined) {
               ctx.fillStyle = isDark ? "#ffffffcc" : "#000000bb";
               ctx.strokeStyle = isDark ? "#000000aa" : "#ffffffaa"; ctx.lineWidth = 2;
               ctx.strokeText(bz.toFixed(1), sx, sy - 8); ctx.fillText(bz.toFixed(1), sx, sy - 8);
               ctx.fillStyle = "#00e5ff"; ctx.lineWidth = 2.5;
+            }
+          }
+          // Edit mode: midpoint "+" markers
+          if (editNodesMode) {
+            ctx.strokeStyle = "#00e5ff"; ctx.lineWidth = 1.5;
+            for (let i = 0; i < verts.length - 1; i++) {
+              const emx = (verts[i][0] + verts[i+1][0]) / 2 * scale + vx;
+              const emy = (verts[i][1] + verts[i+1][1]) / 2 * scale + vy;
+              ctx.beginPath(); ctx.moveTo(emx - 4, emy); ctx.lineTo(emx + 4, emy); ctx.stroke();
+              ctx.beginPath(); ctx.moveTo(emx, emy - 4); ctx.lineTo(emx, emy + 4); ctx.stroke();
             }
           }
         }
@@ -1427,7 +1508,7 @@ export default function GridForgeGIS() {
       }
     }); // end requestAnimationFrame
     return () => { if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); };
-  }, [points, gridData, contourData, filledContourData, hillshadeData, viewState, layers, gs, bounds, baseMap, showGridLines, showCoordLabels, showCompass, viewMode, view3D, compMode, selectedPts, selectionBox, measurePts, measureMode, isDark, tileGen, boundaries, breaklines, drawPts, drawMode, isSnapped, projectCRS, isGeographic]);
+  }, [points, gridData, contourData, filledContourData, hillshadeData, viewState, layers, gs, bounds, baseMap, showGridLines, showCoordLabels, showCompass, viewMode, view3D, compMode, selectedPts, selectionBox, measurePts, measureMode, isDark, tileGen, boundaries, breaklines, drawPts, drawMode, isSnapped, projectCRS, isGeographic, editNodesMode]);
 
   // ── Snap helper ────────────────────────────────────────────────────────────
   const findSnapPoint = (screenX, screenY) => {
@@ -1441,6 +1522,38 @@ export default function GridForgeGIS() {
       if (d < closestDist) { closest = { x: p.x, y: p.y, z: p.z, screenX: sx, screenY: sy }; closestDist = d; }
     }
     return closest;
+  };
+
+  // ── Edge hit detection for edit-nodes mode ───────────────────────────────
+  const findNearestEdge = (screenX, screenY) => {
+    const hitRadius = 8;
+    let best = null, bestDist = hitRadius;
+    const testEdge = (type, id, v0, v1, segIdx) => {
+      const ax = v0[0] * viewState.scale + viewState.x, ay = v0[1] * viewState.scale + viewState.y;
+      const bx = v1[0] * viewState.scale + viewState.x, by = v1[1] * viewState.scale + viewState.y;
+      const dx = bx - ax, dy = by - ay;
+      const lenSq = dx * dx + dy * dy;
+      if (lenSq === 0) return;
+      let t = ((screenX - ax) * dx + (screenY - ay) * dy) / lenSq;
+      t = Math.max(0, Math.min(1, t));
+      const px = ax + t * dx, py = ay + t * dy;
+      const d = Math.sqrt((screenX - px) ** 2 + (screenY - py) ** 2);
+      if (d < bestDist) { bestDist = d; best = { type, id, segmentIdx: segIdx, t }; }
+    };
+    for (const b of boundaries) {
+      const v = b.vertices;
+      for (let i = 0; i < v.length; i++) {
+        const j = (i + 1) % v.length; // closed loop
+        testEdge("boundary", b.id, v[i], v[j], i);
+      }
+    }
+    for (const bl of breaklines) {
+      const v = bl.vertices;
+      for (let i = 0; i < v.length - 1; i++) {
+        testEdge("breakline", bl.id, v[i], v[i + 1], i);
+      }
+    }
+    return best;
   };
 
   // ── Mouse Handlers ─────────────────────────────────────────────────────────
@@ -1532,6 +1645,46 @@ export default function GridForgeGIS() {
         pushHistory();
         nodeEditRef.current = { dragging: true, ...bestHit };
         return;
+      }
+      // Edit Nodes mode: click on edge to insert vertex
+      if (editNodesMode) {
+        const edgeHit = findNearestEdge(screenX, screenY);
+        if (edgeHit) {
+          pushHistory();
+          const mx = (e.clientX - canvasRef.current.getBoundingClientRect().left - viewState.x) / viewState.scale;
+          const my = (e.clientY - canvasRef.current.getBoundingClientRect().top - viewState.y) / viewState.scale;
+          if (edgeHit.type === "boundary") {
+            setBoundaries(prev => prev.map(b => {
+              if (b.id !== edgeHit.id) return b;
+              const nv = [...b.vertices];
+              const insertIdx = (edgeHit.segmentIdx + 1) % (nv.length + 1);
+              nv.splice(edgeHit.segmentIdx + 1, 0, [mx, my]);
+              return { ...b, vertices: nv };
+            }));
+          } else {
+            setBreaklines(prev => prev.map(bl => {
+              if (bl.id !== edgeHit.id) return bl;
+              const nv = [...bl.vertices];
+              const v0 = nv[edgeHit.segmentIdx], v1 = nv[edgeHit.segmentIdx + 1];
+              const t = edgeHit.t;
+              let newVert;
+              const bType = bl.breaklineType || "standard";
+              if (bType === "wall" && v0.length >= 4 && v1.length >= 4) {
+                const zTop = v0[2] + t * (v1[2] - v0[2]);
+                const zBot = v0[3] + t * (v1[3] - v0[3]);
+                newVert = [mx, my, zTop, zBot];
+              } else if (bType === "standard" && v0.length >= 3 && v1.length >= 3) {
+                const z = v0[2] + t * (v1[2] - v0[2]);
+                newVert = [mx, my, z];
+              } else {
+                newVert = [mx, my];
+              }
+              nv.splice(edgeHit.segmentIdx + 1, 0, newVert);
+              return { ...bl, vertices: nv };
+            }));
+          }
+          return;
+        }
       }
     }
     if (e.shiftKey) {
@@ -1656,6 +1809,46 @@ export default function GridForgeGIS() {
     }
     setDrawMode(null); setDrawPts([]); setPendingZ(null); setZInputValue(""); setZInputValue2("");
     snapPointRef.current = null; setIsSnapped(false);
+  };
+
+  const handleContextMenu = (e) => {
+    if (!editNodesMode) return;
+    e.preventDefault();
+    const rect = canvasRef.current.getBoundingClientRect();
+    const screenX = e.clientX - rect.left, screenY = e.clientY - rect.top;
+    const hitRadius = 8;
+    let bestDist = hitRadius, bestHit = null;
+    for (const b of boundaries) {
+      for (let vi = 0; vi < b.vertices.length; vi++) {
+        const sx = b.vertices[vi][0] * viewState.scale + viewState.x;
+        const sy = b.vertices[vi][1] * viewState.scale + viewState.y;
+        const d = Math.sqrt((sx - screenX) ** 2 + (sy - screenY) ** 2);
+        if (d < bestDist) { bestDist = d; bestHit = { type: "boundary", id: b.id, vertexIdx: vi, count: b.vertices.length }; }
+      }
+    }
+    for (const bl of breaklines) {
+      for (let vi = 0; vi < bl.vertices.length; vi++) {
+        const sx = bl.vertices[vi][0] * viewState.scale + viewState.x;
+        const sy = bl.vertices[vi][1] * viewState.scale + viewState.y;
+        const d = Math.sqrt((sx - screenX) ** 2 + (sy - screenY) ** 2);
+        if (d < bestDist) { bestDist = d; bestHit = { type: "breakline", id: bl.id, vertexIdx: vi, count: bl.vertices.length }; }
+      }
+    }
+    if (!bestHit) return;
+    const minVerts = bestHit.type === "boundary" ? 3 : 2;
+    if (bestHit.count <= minVerts) return;
+    pushHistory();
+    if (bestHit.type === "boundary") {
+      setBoundaries(prev => prev.map(b => {
+        if (b.id !== bestHit.id) return b;
+        return { ...b, vertices: b.vertices.filter((_, i) => i !== bestHit.vertexIdx) };
+      }));
+    } else {
+      setBreaklines(prev => prev.map(bl => {
+        if (bl.id !== bestHit.id) return bl;
+        return { ...bl, vertices: bl.vertices.filter((_, i) => i !== bestHit.vertexIdx) };
+      }));
+    }
   };
 
   const finishBreaklineZ = () => {
@@ -1802,12 +1995,14 @@ export default function GridForgeGIS() {
         .tt-wrap:hover .tt-text { opacity: 1 !important; }
         input[type="number"] { background:${C.surface};color:${C.text};border:1px solid ${C.panelBorder};border-radius:6px;padding:6px 8px;font-size:12px;outline:none;font-family:'JetBrains Mono',monospace;width:100%; }
         input[type="number"]:focus, select:focus { border-color: ${C.accent} !important; }
+        *:focus-visible { outline: 2px solid ${C.accent}; outline-offset: 2px; }
+        input:focus-visible, select:focus-visible, textarea:focus-visible { outline: none; border-color: ${C.accent} !important; }
       `}</style>
 
       {/* ─── Top Bar ──────────────────────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "center", height: 44, padding: "0 16px", background: C.panel, borderBottom: `1px solid ${C.panelBorder}`, gap: 12, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-          <div style={{ width: 28, height: 28, borderRadius: 6, background: `linear-gradient(135deg,${C.accent},${C.green})`, display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 700, fontSize: 14, color: "#fff" }}>G</div>
+          <img src="/icon.svg" width="28" height="28" alt="Logo" style={{ borderRadius: 6 }} />
           <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: -0.3 }}>Grid<span style={{ color: C.accent }}>Forge</span><span style={{ color: C.textMuted, fontWeight: 400, fontSize: 11, marginLeft: 6 }}>GIS</span><span style={{ fontSize: 9, color: C.accent, background: C.accent + "18", padding: "2px 6px", borderRadius: 4, marginLeft: 8, fontWeight: 600, letterSpacing: 0.3 }}>v{APP_VERSION}</span></span>
         </div>
         <div style={{ flex: 1 }} />
@@ -1822,7 +2017,7 @@ export default function GridForgeGIS() {
           <Btn size="sm" onClick={fitView}><I.Crosshair /> Fit</Btn>
           <Btn size="sm" onClick={() => setSnapEnabled(p => !p)} variant={snapEnabled ? "success" : "default"} title="Snap to points (S)">Snap</Btn>
           <Btn size="sm" onClick={loadSample} variant="primary"><I.Plus /> Sample</Btn>
-          <Btn size="sm" onClick={() => setShowBugReport(true)} title="Report a Bug"><I.Bug /></Btn>
+          <Btn size="sm" onClick={() => setShowBugReport(true)} title="Report a Bug" aria-label="Report a Bug"><I.Bug /></Btn>
         </div>
       </div>
 
@@ -1832,11 +2027,11 @@ export default function GridForgeGIS() {
         <div style={{ width: 52, background: C.panel, borderRight: `1px solid ${C.panelBorder}`, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 8, gap: 4 }}>
           {panelBtns.map(btn => (
             <Tooltip key={btn.id} text={btn.label}>
-              <button onClick={() => setActivePanel(activePanel === btn.id ? null : btn.id)} style={{ width: 38, height: 38, borderRadius: 8, border: "none", background: activePanel === btn.id ? C.accent + "22" : "transparent", color: activePanel === btn.id ? C.accent : C.textMuted, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}><btn.icon /></button>
+              <button aria-label={btn.label} onClick={() => setActivePanel(activePanel === btn.id ? null : btn.id)} style={{ width: 38, height: 38, borderRadius: 8, border: "none", background: activePanel === btn.id ? C.accent + "22" : "transparent", color: activePanel === btn.id ? C.accent : C.textMuted, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}><btn.icon /></button>
             </Tooltip>
           ))}
           <div style={{ flex: 1 }} />
-          <Tooltip text="Data Table"><button onClick={() => setShowTable(!showTable)} style={{ width: 38, height: 38, borderRadius: 8, border: "none", background: showTable ? C.green + "22" : "transparent", color: showTable ? C.green : C.textMuted, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}><I.Table /></button></Tooltip>
+          <Tooltip text="Data Table"><button aria-label="Data Table" onClick={() => setShowTable(!showTable)} style={{ width: 38, height: 38, borderRadius: 8, border: "none", background: showTable ? C.green + "22" : "transparent", color: showTable ? C.green : C.textMuted, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}><I.Table /></button></Tooltip>
         </div>
 
         {/* ─── Side Panel ─────────────────────────────────────────────────── */}
@@ -1945,9 +2140,17 @@ export default function GridForgeGIS() {
                   <button onClick={() => { pushHistory(); setBoundaries(prev => prev.filter(x => x.id !== b.id)); }} style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer", display: "flex", padding: 2 }} title="Delete"><I.Trash /></button>
                 </div>)}
                 <div style={{ display: "flex", gap: 6 }}>
-                  <Btn size="sm" onClick={() => { setDrawMode("boundary_outer"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); }} variant={drawMode === "boundary_outer" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center" }}>Outer</Btn>
-                  <Btn size="sm" onClick={() => { setDrawMode("boundary_inner"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); }} variant={drawMode === "boundary_inner" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center" }}>Inner</Btn>
+                  <Btn size="sm" onClick={() => { setDrawMode("boundary_outer"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); setEditNodesMode(false); }} variant={drawMode === "boundary_outer" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center" }}>Outer</Btn>
+                  <Btn size="sm" onClick={() => { setDrawMode("boundary_inner"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); setEditNodesMode(false); }} variant={drawMode === "boundary_inner" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center" }}>Inner</Btn>
                 </div>
+                <Btn size="sm" onClick={() => { setEditNodesMode(p => !p); setDrawMode(null); setDrawPts([]); setPendingZ(null); setMeasureMode(null); setMeasurePts([]); }} variant={editNodesMode ? "success" : "default"} style={{ width: "100%", justifyContent: "center" }}><I.Edit /> Edit Nodes</Btn>
+                {editNodesMode && <div style={{ padding: 8, background: C.surface, borderRadius: 6, border: `1px solid ${C.green}44`, fontSize: 10, color: C.textMuted, lineHeight: 1.5 }}>
+                  <span style={{ color: C.green, fontWeight: 600 }}>Edit Nodes active</span><br/>
+                  Click on an edge to add a vertex.<br/>
+                  Right-click a vertex to remove it.<br/>
+                  Drag vertices to reposition.<br/>
+                  Press Escape to exit.
+                </div>}
                 <div style={{ marginTop: 6, padding: 8, background: C.surface, borderRadius: 6, border: `1px solid ${C.panelBorder}` }}>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
                     <span style={{ fontSize: 10, color: C.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Auto Generate</span>
@@ -1988,9 +2191,9 @@ export default function GridForgeGIS() {
                   </div>;
                 })}
                 <div style={{ display: "flex", gap: 4 }}>
-                  <Btn size="sm" onClick={() => { setDrawMode("breakline_standard"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); }} variant={drawMode === "breakline_standard" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center", fontSize: 10 }}>Standard</Btn>
-                  <Btn size="sm" onClick={() => { setDrawMode("breakline_proximity"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); }} variant={drawMode === "breakline_proximity" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center", fontSize: 10 }}>Proximity</Btn>
-                  <Btn size="sm" onClick={() => { setDrawMode("breakline_wall"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); }} variant={drawMode === "breakline_wall" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center", fontSize: 10 }}>Wall</Btn>
+                  <Btn size="sm" onClick={() => { setDrawMode("breakline_standard"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); setEditNodesMode(false); }} variant={drawMode === "breakline_standard" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center", fontSize: 10 }}>Standard</Btn>
+                  <Btn size="sm" onClick={() => { setDrawMode("breakline_proximity"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); setEditNodesMode(false); }} variant={drawMode === "breakline_proximity" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center", fontSize: 10 }}>Proximity</Btn>
+                  <Btn size="sm" onClick={() => { setDrawMode("breakline_wall"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); setEditNodesMode(false); }} variant={drawMode === "breakline_wall" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center", fontSize: 10 }}>Wall</Btn>
                 </div>
               </Section>
               <Section title="Import">
@@ -2292,47 +2495,57 @@ export default function GridForgeGIS() {
             {/* ── Help Panel ──────────────────────────────────────────── */}
             {activePanel === "help" && <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
               {[
-                { title: "Getting Started", content: [
-                  "1. Import Data — Click Import in the sidebar and drop a CSV, GeoJSON, or open a saved .gfproj file. Your point data (X, Y, Z) will appear on the canvas.",
-                  "2. Column Mapping — After import, map your file columns to X (Easting), Y (Northing), Z (Elevation), and optional Number / Level / Description fields.",
-                  "3. Set CRS — Choose a Coordinate Reference System if your data uses projected coordinates. This enables basemap alignment.",
-                  "4. Run Gridding — Open the Grid panel, pick an algorithm, set resolution, and click Run. The interpolated surface renders on the canvas.",
-                ]},
-                { title: "Keyboard Shortcuts", content: [
-                  "Ctrl + Z — Undo last action",
-                  "Ctrl + Shift + Z — Redo",
-                  "S — Toggle snap-to-point mode",
-                  "Scroll wheel — Zoom in / out at cursor",
-                  "Double-click — Place a point at cursor location",
-                  "Click + drag — Pan the map",
-                  "Shift + click-drag — Box select points",
-                ]},
-                { title: "Gridding Algorithms", content: [
-                  "IDW — Inverse Distance Weighting. Fast, general-purpose interpolator. Nearby points have more influence.",
-                  "Natural Neighbor — Smooth interpolation based on Voronoi tessellation. Good for scattered data.",
-                  "Minimum Curvature — Generates the smoothest possible surface through data points. Common in geoscience.",
-                  "Kriging (Ordinary / Universal / Simple) — Geostatistical methods that model spatial correlation via variograms.",
-                  "RBF — Radial Basis Functions. Flexible exact interpolator with multiple kernel choices.",
-                  "TIN — Triangulated Irregular Network. Linear interpolation within Delaunay triangles.",
-                  "Nearest Neighbor — Assigns each cell the value of the closest data point.",
-                  "Moving Average — Averages points within a search radius. Produces a smoothed surface.",
-                  "Polynomial Regression — Fits a polynomial trend surface to the data.",
-                  "Modified Shepard's — Enhanced IDW with local polynomial corrections.",
-                  "Data Metrics — Bins data into grid cells and computes a statistic (mean, min, max, etc.).",
-                ]},
-                { title: "Map Controls", content: [
-                  "Zoom +/− — Buttons at top-right, or scroll wheel",
-                  "Fit View — Resets zoom to show all data points",
-                  "Compass — Toggleable north indicator on the canvas",
-                  "Basemap — Choose None, OSM, or Satellite imagery underlay",
-                  "3D View — Switch to a perspective 3D view with tilt, rotation, and vertical exaggeration controls",
-                ]},
-                { title: "Export", content: [
-                  "CSV — Export point data as comma-separated values",
-                  "GeoJSON — Points or contour lines in GeoJSON format",
-                  "Esri ASCII Grid — Standard .asc raster format for GIS software",
-                  "Project File — Save the full project (.gfproj) including data, grid, and settings",
-                ]},
+                {
+                  title: "Getting Started", content: [
+                    "1. Import Data — Click Import in the sidebar and drop a CSV, GeoJSON, or open a saved .gfproj file. Your point data (X, Y, Z) will appear on the canvas.",
+                    "2. Column Mapping — After import, map your file columns to X (Easting), Y (Northing), Z (Elevation), and optional Number / Level / Description fields.",
+                    "3. Set CRS — Choose a Coordinate Reference System if your data uses projected coordinates. This enables basemap alignment.",
+                    "4. Run Gridding — Open the Grid panel, pick an algorithm, set resolution, and click Run. The interpolated surface renders on the canvas.",
+                  ]
+                },
+                {
+                  title: "Keyboard Shortcuts", content: [
+                    "Ctrl + Z — Undo last action",
+                    "Ctrl + Shift + Z — Redo",
+                    "S — Toggle snap-to-point mode",
+                    "Scroll wheel — Zoom in / out at cursor",
+                    "Double-click — Place a point at cursor location",
+                    "Click + drag — Pan the map",
+                    "Shift + click-drag — Box select points",
+                  ]
+                },
+                {
+                  title: "Gridding Algorithms", content: [
+                    "IDW — Inverse Distance Weighting. Fast, general-purpose interpolator. Nearby points have more influence.",
+                    "Natural Neighbor — Smooth interpolation based on Voronoi tessellation. Good for scattered data.",
+                    "Minimum Curvature — Generates the smoothest possible surface through data points. Common in geoscience.",
+                    "Kriging (Ordinary / Universal / Simple) — Geostatistical methods that model spatial correlation via variograms.",
+                    "RBF — Radial Basis Functions. Flexible exact interpolator with multiple kernel choices.",
+                    "TIN — Triangulated Irregular Network. Linear interpolation within Delaunay triangles.",
+                    "Nearest Neighbor — Assigns each cell the value of the closest data point.",
+                    "Moving Average — Averages points within a search radius. Produces a smoothed surface.",
+                    "Polynomial Regression — Fits a polynomial trend surface to the data.",
+                    "Modified Shepard's — Enhanced IDW with local polynomial corrections.",
+                    "Data Metrics — Bins data into grid cells and computes a statistic (mean, min, max, etc.).",
+                  ]
+                },
+                {
+                  title: "Map Controls", content: [
+                    "Zoom +/− — Buttons at top-right, or scroll wheel",
+                    "Fit View — Resets zoom to show all data points",
+                    "Compass — Toggleable north indicator on the canvas",
+                    "Basemap — Choose None, OSM, or Satellite imagery underlay",
+                    "3D View — Switch to a perspective 3D view with tilt, rotation, and vertical exaggeration controls",
+                  ]
+                },
+                {
+                  title: "Export", content: [
+                    "CSV — Export point data as comma-separated values",
+                    "GeoJSON — Points or contour lines in GeoJSON format",
+                    "Esri ASCII Grid — Standard .asc raster format for GIS software",
+                    "Project File — Save the full project (.gfproj) including data, grid, and settings",
+                  ]
+                },
               ].map(section => (
                 <div key={section.title}>
                   <div style={{ fontSize: 12, fontWeight: 600, color: C.accent, marginBottom: 6 }}>{section.title}</div>
@@ -2349,16 +2562,16 @@ export default function GridForgeGIS() {
 
         {/* ─── Map Canvas ─────────────────────────────────────────────────── */}
         <div ref={containerRef} style={{ flex: 1, position: "relative", overflow: "hidden" }} onDrop={handleDrop} onDragOver={e => e.preventDefault()}>
-          <canvas ref={canvasRef} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onWheel={handleWheel} onClick={handleCanvasClick} onDoubleClick={handleCanvasDblClick}
-            style={{ width: "100%", height: "100%", cursor: drawMode ? "crosshair" : measureMode ? "crosshair" : dragRef.current.dragging ? "grabbing" : "crosshair" }} />
+          <canvas ref={canvasRef} role="img" aria-label={`GIS map canvas. ${points.length} points loaded${gridData ? `, ${gridData.nx}×${gridData.ny} grid` : ""}. Mode: ${viewMode}`} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onWheel={handleWheel} onClick={handleCanvasClick} onDoubleClick={handleCanvasDblClick} onContextMenu={handleContextMenu}
+            style={{ width: "100%", height: "100%", cursor: editNodesMode ? "crosshair" : drawMode ? "crosshair" : measureMode ? "crosshair" : dragRef.current.dragging ? "grabbing" : "crosshair" }}>GIS map view</canvas>
 
           {/* Map toolbar */}
           <div style={{ position: "absolute", top: 12, right: 12, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
             {[{ label: "+", fn: () => setViewState(p => ({ ...p, scale: p.scale * 1.3 })), tip: "Zoom In" }, { label: "−", fn: () => setViewState(p => ({ ...p, scale: p.scale * 0.7 })), tip: "Zoom Out" }, { label: null, fn: fitView, icon: I.Crosshair, tip: "Fit View" }].map((b, i) =>
-              <button key={i} onClick={b.fn} title={b.tip} style={{ width: 32, height: 32, borderRadius: 6, border: `1px solid ${C.panelBorder}`, background: C.panel + "dd", color: C.text, cursor: "pointer", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{b.icon ? <b.icon /> : b.label}</button>
+              <button key={i} onClick={b.fn} title={b.tip} aria-label={b.tip} style={{ width: 32, height: 32, borderRadius: 6, border: `1px solid ${C.panelBorder}`, background: C.panel + "dd", color: C.text, cursor: "pointer", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{b.icon ? <b.icon /> : b.label}</button>
             )}
             <div style={{ height: 4 }} />
-            <button onClick={() => setShowCompass(p => !p)} title="Toggle Compass" style={{ width: 32, height: 32, borderRadius: 6, border: `1px solid ${showCompass ? C.accent + "55" : C.panelBorder}`, background: showCompass ? C.accent + "18" : C.panel + "dd", color: showCompass ? C.accent : C.textMuted, cursor: "pointer", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center" }}><I.Compass /></button>
+            <button onClick={() => setShowCompass(p => !p)} title="Toggle Compass" aria-label="Toggle Compass" style={{ width: 32, height: 32, borderRadius: 6, border: `1px solid ${showCompass ? C.accent + "55" : C.panelBorder}`, background: showCompass ? C.accent + "18" : C.panel + "dd", color: showCompass ? C.accent : C.textMuted, cursor: "pointer", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center" }}><I.Compass /></button>
           </div>
 
           {/* 3D controls */}
@@ -2418,9 +2631,14 @@ export default function GridForgeGIS() {
         </div>
       </div>
 
+      {/* ─── Screen reader status announcements ─────────────────────────── */}
+      <div role="status" aria-live="polite" style={{ position: "absolute", width: 1, height: 1, padding: 0, margin: -1, overflow: "hidden", clip: "rect(0,0,0,0)", whiteSpace: "nowrap", border: 0 }}>
+        {gridding ? `Gridding in progress: ${griddingStage} ${griddingProgress}%` : griddingProgress === 100 ? "Gridding complete" : ""}
+      </div>
+
       {/* ─── CRS Prompt Modal ──────────────────────────────────────────────── */}
-      {showCRSPrompt && <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
-        <div style={{ background: C.panel, border: `1px solid ${C.panelBorder}`, borderRadius: 12, padding: 24, width: 420, maxHeight: "80vh", overflow: "auto", boxShadow: "0 16px 64px rgba(0,0,0,0.5)" }}>
+      {showCRSPrompt && <div onClick={(e) => { if (e.target === e.currentTarget) setShowCRSPrompt(false); }} style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
+        <div role="dialog" aria-modal="true" aria-label="Project CRS" style={{ background: C.panel, border: `1px solid ${C.panelBorder}`, borderRadius: 12, padding: 24, width: 420, maxHeight: "80vh", overflow: "auto", boxShadow: "0 16px 64px rgba(0,0,0,0.5)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
             <I.Globe /><span style={{ fontWeight: 700, fontSize: 15 }}>Project CRS</span>
           </div>
@@ -2451,8 +2669,8 @@ export default function GridForgeGIS() {
       </div>}
 
       {/* ─── Bug Report Modal ──────────────────────────────────────────────── */}
-      {showBugReport && <div style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
-        <div style={{ background: C.panel, border: `1px solid ${C.panelBorder}`, borderRadius: 12, padding: 24, width: 480, maxHeight: "80vh", overflow: "auto", boxShadow: "0 16px 64px rgba(0,0,0,0.5)" }}>
+      {showBugReport && <div onClick={(e) => { if (e.target === e.currentTarget) { setBugTitle(""); setBugDesc(""); setShowBugReport(false); } }} style={{ position: "fixed", inset: 0, zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.6)", backdropFilter: "blur(4px)" }}>
+        <div role="dialog" aria-modal="true" aria-label="Report a Bug" style={{ background: C.panel, border: `1px solid ${C.panelBorder}`, borderRadius: 12, padding: 24, width: 480, maxHeight: "80vh", overflow: "auto", boxShadow: "0 16px 64px rgba(0,0,0,0.5)" }}>
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
             <I.Bug /><span style={{ fontWeight: 700, fontSize: 15 }}>Report a Bug</span>
           </div>
