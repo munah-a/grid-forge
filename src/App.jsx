@@ -2248,9 +2248,9 @@ export default function GridForgeGIS() {
         ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fill();
         ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = isDark ? "rgba(15,22,41,0.9)" : "rgba(255,255,255,0.9)"; ctx.fill();
         ctx.strokeStyle = isDark ? C.panelBorder : "#bcc2cc"; ctx.lineWidth = 2; ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(cx, cy + r - 10); ctx.lineTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.closePath(); ctx.fillStyle = C.accent; ctx.fill();
-        ctx.beginPath(); ctx.moveTo(cx, cy - r + 10); ctx.lineTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.closePath(); ctx.fillStyle = isDark ? "#334155" : "#94a3b8"; ctx.fill();
-        ctx.font = "bold 14px 'DM Sans',sans-serif"; ctx.fillStyle = C.accent; ctx.textAlign = "center"; ctx.fillText("N", cx, cy + r - 2);
+        ctx.beginPath(); ctx.moveTo(cx, cy - r + 10); ctx.lineTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.closePath(); ctx.fillStyle = C.accent; ctx.fill();
+        ctx.beginPath(); ctx.moveTo(cx, cy + r - 10); ctx.lineTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.closePath(); ctx.fillStyle = isDark ? "#334155" : "#94a3b8"; ctx.fill();
+        ctx.font = "bold 14px 'DM Sans',sans-serif"; ctx.fillStyle = C.accent; ctx.textAlign = "center"; ctx.fillText("N", cx, cy - r + 6);
       }
     }); // end requestAnimationFrame
     return () => { if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); };
