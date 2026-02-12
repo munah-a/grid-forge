@@ -15,6 +15,7 @@ import {
   project3D, generateSampleData,
   pointInPolygon, densifyBreakline, densifyProximityBreakline, densifyWallBreakline,
   buildSpatialIndex, applyBoundaryMask,
+  computeConvexHull, computeConcaveHull,
 } from "./engine.js";
 import GriddingWorker from "./gridding.worker.js?worker";
 import { CRS_REGISTRY, fetchCRSDefinition, transformPoints, transformCoord, isGeographicCRS } from "./crs.js";
@@ -95,6 +96,8 @@ const I = {
   Filter: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>,
   Boundary: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="3 6 9 3 21 6 21 18 9 21 3 18" strokeDasharray="3 2" /><line x1="9" y1="3" x2="9" y2="21" /></svg>,
   Bug: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>,
+  Undo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>,
+  Redo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10" /></svg>,
 };
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -214,6 +217,7 @@ export default function GridForgeGIS() {
   const [headers, setHeaders] = useState([]);
   const [fileName, setFileName] = useState("");
   const [columnMapping, setColumnMapping] = useState({ x: "", y: "", z: "", pointNo: "", desc: "" });
+  const [hiddenDescs, setHiddenDescs] = useState(new Set()); // descriptions to hide
   // ── Grid State ─────────────────────────────────────────────────────────────
   const [gridData, setGridData] = useState(null);
   const [contourData, setContourData] = useState(null);
@@ -239,7 +243,7 @@ export default function GridForgeGIS() {
   const [tableSortCol, setTableSortCol] = useState(null);
   const [tableSortAsc, setTableSortAsc] = useState(true);
   // ── CRS State ───────────────────────────────────────────────────────────
-  const [projectCRS, setProjectCRS] = useState("LOCAL");
+  const [projectCRS, setProjectCRS] = useState("EPSG:32643"); // Default: UTM Zone 43N
   const [fileCRS, setFileCRS] = useState("LOCAL");
   const [showCRSPrompt, setShowCRSPrompt] = useState(false);
   const [pendingFileAfterCRS, setPendingFileAfterCRS] = useState(false);
@@ -261,7 +265,9 @@ export default function GridForgeGIS() {
     polyOrder: 2, shepardNeighbors: 12, dataMetric: "mean",
     minPoints: 1, weighted: true, contourLabelSize: 9,
     showContourLabels: true, majorInterval: 5,
-    showPointNumbers: false, showPointLevels: false, showPointDescs: false,
+    showPointNumbers: false, showPointLevels: false, showPointDescs: false, pointLabelSize: 9,
+    rampMode: "auto", rampMin: 0, rampMax: 100,
+    contourMethod: "grid",
   });
   const updateGs = (k, v) => setGs(p => ({ ...p, [k]: v }));
   // ── Phase 3 State ──────────────────────────────────────────────────────────
@@ -291,6 +297,7 @@ export default function GridForgeGIS() {
   const boundaryFileRef = useRef(null);
   const dragRef = useRef({ dragging: false, startX: 0, startY: 0, startViewX: 0, startViewY: 0 });
   const selRef = useRef({ selecting: false, sx: 0, sy: 0 });
+  const nodeEditRef = useRef({ dragging: false, type: null, id: null, vertexIdx: -1 }); // type: 'boundary'|'breakline'
   const cursorCoordsRef = useRef(null);
   const coordsContainerRef = useRef(null);
   const coordsXRef = useRef(null);
@@ -304,6 +311,43 @@ export default function GridForgeGIS() {
   const snapPointRef = useRef(null); // { x, y, z, screenX, screenY }
   const [tileGen, setTileGen] = useState(0);
 
+  // ── Undo / Redo ──────────────────────────────────────────────────────────
+  const MAX_HISTORY = 50;
+  const historyRef = useRef([]);
+  const futureRef = useRef([]);
+  const [undoVersion, setUndoVersion] = useState(0);
+
+  const getSnapshot = () => ({ points, breaklines, boundaries, drawPts, layers, gridData, contourData, filledContourData, hillshadeData, gridStats });
+  const restoreSnapshot = (snap) => {
+    setPoints(snap.points); setBreaklines(snap.breaklines); setBoundaries(snap.boundaries);
+    setDrawPts(snap.drawPts); setLayers(snap.layers); setGridData(snap.gridData);
+    setContourData(snap.contourData); setFilledContourData(snap.filledContourData);
+    setHillshadeData(snap.hillshadeData); setGridStats(snap.gridStats);
+  };
+  const pushHistory = () => {
+    historyRef.current = [...historyRef.current.slice(-(MAX_HISTORY - 1)), getSnapshot()];
+    futureRef.current = [];
+    setUndoVersion(v => v + 1);
+  };
+  const undo = () => {
+    if (historyRef.current.length === 0) return;
+    futureRef.current = [...futureRef.current, getSnapshot()];
+    const snap = historyRef.current[historyRef.current.length - 1];
+    historyRef.current = historyRef.current.slice(0, -1);
+    restoreSnapshot(snap);
+    setUndoVersion(v => v + 1);
+  };
+  const redo = () => {
+    if (futureRef.current.length === 0) return;
+    historyRef.current = [...historyRef.current, getSnapshot()];
+    const snap = futureRef.current[futureRef.current.length - 1];
+    futureRef.current = futureRef.current.slice(0, -1);
+    restoreSnapshot(snap);
+    setUndoVersion(v => v + 1);
+  };
+  const canUndo = undoVersion >= 0 && historyRef.current.length > 0;
+  const canRedo = undoVersion >= 0 && futureRef.current.length > 0;
+
   // ── Computed ────────────────────────────────────────────────────────────────
   const bounds = useMemo(() => {
     if (points.length === 0) return null;
@@ -315,6 +359,32 @@ export default function GridForgeGIS() {
     }
     return { xMin, xMax, yMin, yMax, zMin, zMax };
   }, [points]);
+
+  // Unique descriptions for filter UI
+  const uniqueDescs = useMemo(() => {
+    const descs = new Set();
+    for (const p of points) if (p.desc) descs.add(String(p.desc));
+    return [...descs].sort();
+  }, [points]);
+
+  // Filtered points (excludes hidden descriptions)
+  const filteredPoints = useMemo(() => {
+    if (hiddenDescs.size === 0) return points;
+    return points.filter(p => !hiddenDescs.has(String(p.desc || "")));
+  }, [points, hiddenDescs]);
+
+  // Filtered bounds
+  const filteredBounds = useMemo(() => {
+    if (hiddenDescs.size === 0) return bounds;
+    if (filteredPoints.length === 0) return null;
+    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity, zMin = Infinity, zMax = -Infinity;
+    for (const p of filteredPoints) {
+      if (p.x < xMin) xMin = p.x; if (p.x > xMax) xMax = p.x;
+      if (p.y < yMin) yMin = p.y; if (p.y > yMax) yMax = p.y;
+      if (p.z < zMin) zMin = p.z; if (p.z > zMax) zMax = p.z;
+    }
+    return { xMin, xMax, yMin, yMax, zMin, zMax };
+  }, [filteredPoints, hiddenDescs, bounds]);
 
   const sortedPoints = useMemo(() => {
     if (!tableSortCol) return points;
@@ -333,6 +403,17 @@ export default function GridForgeGIS() {
 
   // Pre-computed color LUT for fast per-point rendering (avoids hex parsing)
   const colorLUT = useMemo(() => buildColorLUT(gs.colorRamp, 256), [gs.colorRamp]);
+
+  // Effective Z range for color mapping (auto from grid, or user-defined)
+  const effectiveZRange = useMemo(() => {
+    if (gs.rampMode === "manual") {
+      const lo = Number(gs.rampMin), hi = Number(gs.rampMax);
+      return { zMin: lo, zMax: hi, range: (hi - lo) || 1 };
+    }
+    if (gridData) return { zMin: gridData.zMin, zMax: gridData.zMax, range: (gridData.zMax - gridData.zMin) || 1 };
+    if (bounds) return { zMin: bounds.zMin, zMax: bounds.zMax, range: (bounds.zMax - bounds.zMin) || 1 };
+    return { zMin: 0, zMax: 1, range: 1 };
+  }, [gs.rampMode, gs.rampMin, gs.rampMax, gridData, bounds]);
 
   const gridPreview = useMemo(() => {
     if (!bounds) return null;
@@ -361,6 +442,7 @@ export default function GridForgeGIS() {
 
   const deleteSelectedPoints = useCallback(() => {
     if (selectedPts.size === 0) return;
+    pushHistory();
     setPoints(prev => prev.filter((_, i) => !selectedPts.has(i)));
     setSelectedPts(new Set());
   }, [selectedPts]);
@@ -368,6 +450,9 @@ export default function GridForgeGIS() {
   // ── Keyboard shortcuts: Escape to cancel draw, S to toggle snap, Delete to remove selected ─────────
   useEffect(() => {
     const handler = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "z" && !e.shiftKey) { e.preventDefault(); undo(); return; }
+      if ((e.ctrlKey || e.metaKey) && (e.key === "y" || (e.key === "z" && e.shiftKey))) { e.preventDefault(); redo(); return; }
+      if ((e.ctrlKey || e.metaKey) && e.key === "Z") { e.preventDefault(); redo(); return; }
       if (e.key === "Escape" && drawMode) {
         setDrawMode(null); setDrawPts([]); setPendingZ(null); setZInputValue(""); setZInputValue2("");
         snapPointRef.current = null; setIsSnapped(false);
@@ -383,14 +468,14 @@ export default function GridForgeGIS() {
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [drawMode, deleteSelectedPoints]);
+  }, [drawMode, deleteSelectedPoints, undo, redo]);
 
   // ── Offscreen raster cache (ImageData-based) ───────────────────────────────
   useEffect(() => {
     if (!gridData) { offscreenRef.current = null; return; }
-    const { grid, gridX, gridY, nx, ny, zMin, zMax } = gridData;
+    const { grid, gridX, gridY, nx, ny } = gridData;
     if (nx < 2 || ny < 2) { offscreenRef.current = null; return; }
-    const range = zMax - zMin || 1;
+    const { zMin, zMax, range } = effectiveZRange;
     const oc = document.createElement('canvas');
     oc.width = nx; oc.height = ny;
     const octx = oc.getContext('2d');
@@ -451,7 +536,7 @@ export default function GridForgeGIS() {
       octx.drawImage(hc, 0, 0);
     }
     offscreenRef.current = oc;
-  }, [gridData, filledContourData, hillshadeData, gs.colorRamp, gs.showRaster, gs.showFilledContours, gs.showHillshade, gs.hillOpacity]);
+  }, [gridData, filledContourData, hillshadeData, gs.colorRamp, gs.showRaster, gs.showFilledContours, gs.showHillshade, gs.hillOpacity, effectiveZRange]);
 
   const handleFile = useCallback((file) => {
     if (!file) return;
@@ -493,6 +578,7 @@ export default function GridForgeGIS() {
 
   const applyMapping = useCallback(() => {
     if (!columnMapping.x || !columnMapping.y) return;
+    pushHistory();
     // Map ALL rows - no limit
     let pts = allRows.map(r => ({
       x: +r[columnMapping.x], y: +r[columnMapping.y],
@@ -513,10 +599,13 @@ export default function GridForgeGIS() {
   }, [columnMapping, allRows, fileName, fileCRS, projectCRS]);
 
   const runGridding = useCallback(() => {
-    if (points.length === 0 || !bounds) return;
+    const gridPts = filteredPoints;
+    const gridBounds = filteredBounds;
+    if (gridPts.length === 0 || !gridBounds) return;
     setGridding(true);
     setGriddingProgress(0);
     setGriddingStage("Starting…");
+    const preGridSnapshot = getSnapshot();
 
     // Terminate any previous worker
     if (workerRef.current) { workerRef.current.terminate(); workerRef.current = null; }
@@ -530,6 +619,9 @@ export default function GridForgeGIS() {
         setGriddingProgress(msg.percent);
         setGriddingStage(msg.stage || "");
       } else if (msg.type === "result") {
+        historyRef.current = [...historyRef.current.slice(-(MAX_HISTORY - 1)), preGridSnapshot];
+        futureRef.current = [];
+        setUndoVersion(v => v + 1);
         const { grid: gridArr, gridX, gridY, nx, ny, stats, contours, filledContours, hillshade, zMin, zMax } = msg;
         // Reconstruct Float64Array from plain arrays
         const grid = new Float64Array(gridArr);
@@ -569,8 +661,8 @@ export default function GridForgeGIS() {
     };
 
     // Send data to worker
-    worker.postMessage({ points, bounds, gs, boundaries, breaklines });
-  }, [points, bounds, gs, boundaries, breaklines]);
+    worker.postMessage({ points: gridPts, bounds: gridBounds, gs, boundaries, breaklines });
+  }, [filteredPoints, filteredBounds, gs, boundaries, breaklines]);
 
   // ── Export helpers ──────────────────────────────────────────────────────────
   const downloadFile = (content, name, type = "text/plain") => {
@@ -596,6 +688,7 @@ export default function GridForgeGIS() {
     const reader = new FileReader();
     reader.onload = (e) => {
       try {
+        pushHistory();
         const state = deserializeProject(e.target.result);
         if (state.points) setPoints(state.points);
         if (state.gridData) setGridData(state.gridData);
@@ -782,28 +875,33 @@ export default function GridForgeGIS() {
         }
 
         if (latLo < latHi && lonLo < lonHi) {
-          let tz;
+          // Compute ideal zoom, then clamp to provider max
+          // OSM maxes at z19; ArcGIS World Imagery goes up to z23 in most areas
+          const maxProviderZoom = baseMap === "satellite" ? 23 : 19;
+          let idealZ;
           if (projectedMode) {
             const degreesPerPixel = (lonHi - lonLo) / w;
-            tz = Math.max(1, Math.min(19, Math.round(Math.log2(360 / (degreesPerPixel * 256)))));
+            idealZ = Math.round(Math.log2(360 / (degreesPerPixel * 256)));
           } else {
-            tz = Math.max(1, Math.min(19, Math.round(Math.log2(360 * scale / 256))));
+            idealZ = Math.round(Math.log2(360 * scale / 256));
           }
+          // Clamp to provider range — tiles at tz will upscale when idealZ > maxProviderZoom
+          const tz = Math.max(1, Math.min(maxProviderZoom, idealZ));
           const txMin = Math.max(0, Math.floor(lon2tileX(lonLo, tz)));
           const txMax = Math.min((1 << tz) - 1, Math.floor(lon2tileX(lonHi, tz)));
           const tyMin = Math.max(0, Math.floor(lat2tileY(latHi, tz)));
           const tyMax = Math.min((1 << tz) - 1, Math.floor(lat2tileY(latLo, tz)));
           const cache = tileCacheRef.current;
           let tc = 0;
-          for (let tty = tyMin; tty <= tyMax && tc < 64; tty++) {
-            for (let ttx = txMin; ttx <= txMax && tc < 64; ttx++) {
+          for (let tty = tyMin; tty <= tyMax && tc < 200; tty++) {
+            for (let ttx = txMin; ttx <= txMax && tc < 200; ttx++) {
               tc++;
               const key = `${tz}/${ttx}/${tty}`;
               if (!cache.has(key)) {
                 const img = new Image();
-                img.crossOrigin = "anonymous";
+                if (baseMap === "osm") img.crossOrigin = "anonymous"; // ArcGIS: skip crossOrigin to avoid CORS failures
                 img.src = tileUrlFn(tz, ttx, tty);
-                const entry = { img, loaded: false };
+                const entry = { img, loaded: false, failed: false };
                 cache.set(key, entry);
                 img.onload = () => {
                   entry.loaded = true;
@@ -814,36 +912,55 @@ export default function GridForgeGIS() {
                     }, 100);
                   }
                 };
+                img.onerror = () => {
+                  entry.failed = true;
+                  cache.delete(key); // Allow retry on next frame
+                };
               }
               const tile = cache.get(key);
               if (tile?.loaded) {
+                let sL, sR, sTop, sBot;
                 if (projectedMode) {
                   // Transform tile corners from EPSG:4326 to project CRS, then to screen
                   const wst = tileX2lon(ttx, tz), est = tileX2lon(ttx + 1, tz);
                   const nth = tileY2lat(tty, tz), sth = tileY2lat(tty + 1, tz);
                   const [pxNW, pyNW] = transformCoord(wst, nth, "EPSG:4326", projectCRS);
                   const [pxSE, pySE] = transformCoord(est, sth, "EPSG:4326", projectCRS);
-                  const sL = pxNW * scale + vx, sR = pxSE * scale + vx;
+                  sL = pxNW * scale + vx;
+                  sR = pxSE * scale + vx;
+                  // In projected CRS (e.g. UTM): pyNW > pySE (northing)
+                  // On screen: sN = pyNW*scale+vy > sS = pySE*scale+vy
+                  // North = higher screen y = further DOWN; South = lower screen y = UP
                   const sN = pyNW * scale + vy, sS = pySE * scale + vy;
-                  ctx.drawImage(tile.img, sL, sS, sR - sL, sN - sS);
+                  sTop = Math.min(sN, sS); // screen-top = south (smaller y)
+                  sBot = Math.max(sN, sS); // screen-bottom = north (larger y)
                 } else {
-                  // Geographic mode: original drawing logic
+                  // Geographic: data coords are lon/lat
                   const wst = tileX2lon(ttx, tz), est = tileX2lon(ttx + 1, tz);
                   const nth = tileY2lat(tty, tz), sth = tileY2lat(tty + 1, tz);
-                  const sL = wst * scale + vx, sR = est * scale + vx;
+                  sL = wst * scale + vx;
+                  sR = est * scale + vx;
+                  // nth > sth → sN > sS (north = further down on canvas)
                   const sN = nth * scale + vy, sS = sth * scale + vy;
+                  sTop = sS; // south edge = smaller screen y = top
+                  sBot = sN; // north edge = larger screen y = bottom
+                }
+                const sW = sR - sL, sH = sBot - sTop;
+                if (sW > 0.5 && sH > 0.5) {
+                  // Tile image row 0 = north, but on screen north = bottom (sBot).
+                  // Flip vertically: translate to top, scale Y by -1, draw at -sH.
                   ctx.save();
-                  ctx.translate(sL, sN);
+                  ctx.translate(sL, sBot);
                   ctx.scale(1, -1);
-                  ctx.drawImage(tile.img, 0, 0, sR - sL, sN - sS);
+                  ctx.drawImage(tile.img, 0, 0, sW, sH);
                   ctx.restore();
                 }
               }
             }
           }
-          if (cache.size > 200) {
+          if (cache.size > 500) {
             const keys = [...cache.keys()];
-            for (let i = 0; i < keys.length - 150; i++) cache.delete(keys[i]);
+            for (let i = 0; i < keys.length - 400; i++) cache.delete(keys[i]);
           }
         }
       }
@@ -901,33 +1018,111 @@ export default function GridForgeGIS() {
         ctx.globalAlpha = 1;
       }
 
-      // Contour lines — batched per-level to minimize stroke() calls
+      // Contour lines — polyline-based rendering with legacy fallback
       if (contourData && contourLayer?.visible && gs.showContours && gridData) {
         ctx.globalAlpha = (contourLayer.opacity || 100) / 100;
-        const range = gridData.zMax - gridData.zMin || 1;
-        contourData.forEach(({ level, segments }, ci) => {
-          const t = (level - gridData.zMin) / range;
+        const range = effectiveZRange.range;
+        contourData.forEach(({ level, polylines, segments }, ci) => {
+          const t = (level - effectiveZRange.zMin) / range;
           const isMajor = gs.majorInterval > 0 && (ci % gs.majorInterval === 0);
           ctx.strokeStyle = getColorFromRamp(Math.min(1, t * 0.8 + 0.1), gs.colorRamp);
           ctx.lineWidth = isMajor ? 2 : 1;
-          // Batch all segments into one path + single stroke()
-          ctx.beginPath();
-          for (let si = 0; si < segments.length; si++) {
-            const [p1, p2] = segments[si];
-            ctx.moveTo(p1[0] * scale + vx, p1[1] * scale + vy);
-            ctx.lineTo(p2[0] * scale + vx, p2[1] * scale + vy);
-          }
-          ctx.stroke();
-          // Labels
-          if (gs.showContourLabels && segments.length > 3 && (isMajor || segments.length > 10)) {
-            const mid = segments[Math.floor(segments.length / 3)];
-            if (mid) {
-              const mx = (mid[0][0] + mid[1][0]) / 2 * scale + vx, my = (mid[0][1] + mid[1][1]) / 2 * scale + vy;
-              ctx.font = `bold ${gs.contourLabelSize}px 'DM Sans',sans-serif`;
-              ctx.fillStyle = isDark ? "#ffffffcc" : "#000000bb";
-              ctx.strokeStyle = isDark ? "#00000088" : "#ffffff99"; ctx.lineWidth = 2.5;
-              const lbl = level.toFixed(1);
-              ctx.strokeText(lbl, mx - 12, my + 3); ctx.fillText(lbl, mx - 12, my + 3);
+          ctx.lineJoin = 'round';
+          ctx.lineCap = 'round';
+
+          if (polylines && polylines.length > 0) {
+            // New polyline-based rendering: one moveTo + multiple lineTo per chain
+            ctx.beginPath();
+            for (const pl of polylines) {
+              const pts = pl.points;
+              if (pts.length < 2) continue;
+              ctx.moveTo(pts[0][0] * scale + vx, pts[0][1] * scale + vy);
+              for (let k = 1; k < pts.length; k++) {
+                ctx.lineTo(pts[k][0] * scale + vx, pts[k][1] * scale + vy);
+              }
+              if (pl.closed) ctx.closePath();
+            }
+            ctx.stroke();
+
+            // Labels: place at 40% along the longest polyline (by arc length)
+            if (gs.showContourLabels && (isMajor || polylines.reduce((s, p) => s + p.points.length, 0) > 10)) {
+              // Find longest polyline by arc length
+              let longestPl = null, longestLen = 0;
+              for (const pl of polylines) {
+                if (pl.points.length < 3) continue;
+                let len = 0;
+                for (let k = 1; k < pl.points.length; k++) {
+                  const dx = pl.points[k][0] - pl.points[k - 1][0];
+                  const dy = pl.points[k][1] - pl.points[k - 1][1];
+                  len += Math.sqrt(dx * dx + dy * dy);
+                }
+                if (pl.closed) {
+                  const dx = pl.points[0][0] - pl.points[pl.points.length - 1][0];
+                  const dy = pl.points[0][1] - pl.points[pl.points.length - 1][1];
+                  len += Math.sqrt(dx * dx + dy * dy);
+                }
+                if (len > longestLen) { longestLen = len; longestPl = pl; }
+              }
+              if (longestPl && longestLen > 0) {
+                // Walk to 40% arc length
+                const target = longestLen * 0.4;
+                let walked = 0, labelPt = null, labelAngle = 0;
+                const lpts = longestPl.points;
+                for (let k = 1; k < lpts.length; k++) {
+                  const dx = lpts[k][0] - lpts[k - 1][0];
+                  const dy = lpts[k][1] - lpts[k - 1][1];
+                  const segLen = Math.sqrt(dx * dx + dy * dy);
+                  if (walked + segLen >= target && segLen > 0) {
+                    const frac = (target - walked) / segLen;
+                    labelPt = [lpts[k - 1][0] + dx * frac, lpts[k - 1][1] + dy * frac];
+                    labelAngle = Math.atan2(dy, dx);
+                    break;
+                  }
+                  walked += segLen;
+                }
+                if (labelPt) {
+                  const mx = labelPt[0] * scale + vx, my = labelPt[1] * scale + vy;
+                  // Keep label angle readable (not upside-down)
+                  let angle = labelAngle;
+                  if (angle > Math.PI / 2) angle -= Math.PI;
+                  else if (angle < -Math.PI / 2) angle += Math.PI;
+                  ctx.save();
+                  ctx.translate(mx, my);
+                  ctx.rotate(angle);
+                  ctx.font = `bold ${gs.contourLabelSize}px 'DM Sans',sans-serif`;
+                  ctx.textAlign = 'center';
+                  ctx.textBaseline = 'middle';
+                  const lbl = level.toFixed(1);
+                  // Halo background
+                  ctx.strokeStyle = isDark ? "#000000aa" : "#ffffffcc";
+                  ctx.lineWidth = 3;
+                  ctx.strokeText(lbl, 0, 0);
+                  ctx.fillStyle = isDark ? "#ffffffcc" : "#000000bb";
+                  ctx.fillText(lbl, 0, 0);
+                  ctx.restore();
+                }
+              }
+            }
+          } else if (segments && segments.length > 0) {
+            // Legacy fallback: segment-by-segment rendering for old project files
+            ctx.beginPath();
+            for (let si = 0; si < segments.length; si++) {
+              const [p1, p2] = segments[si];
+              ctx.moveTo(p1[0] * scale + vx, p1[1] * scale + vy);
+              ctx.lineTo(p2[0] * scale + vx, p2[1] * scale + vy);
+            }
+            ctx.stroke();
+            // Legacy labels
+            if (gs.showContourLabels && segments.length > 3 && (isMajor || segments.length > 10)) {
+              const mid = segments[Math.floor(segments.length / 3)];
+              if (mid) {
+                const mx = (mid[0][0] + mid[1][0]) / 2 * scale + vx, my = (mid[0][1] + mid[1][1]) / 2 * scale + vy;
+                ctx.font = `bold ${gs.contourLabelSize}px 'DM Sans',sans-serif`;
+                ctx.fillStyle = isDark ? "#ffffffcc" : "#000000bb";
+                ctx.strokeStyle = isDark ? "#00000088" : "#ffffff99"; ctx.lineWidth = 2.5;
+                const lbl = level.toFixed(1);
+                ctx.strokeText(lbl, mx - 12, my + 3); ctx.fillText(lbl, mx - 12, my + 3);
+              }
             }
           }
         });
@@ -937,7 +1132,7 @@ export default function GridForgeGIS() {
       // Points — optimized with color LUT, sprite-stamping, and LOD decimation
       if (points.length > 0 && pointLayer?.visible) {
         ctx.globalAlpha = (pointLayer.opacity || 100) / 100;
-        const zRange = bounds ? (bounds.zMax - bounds.zMin || 1) : 1;
+        const zRange = effectiveZRange.range;
         const sz = (pointLayer.size || 4) * Math.min(scale / 0.5, 2);
         const spriteD = Math.max(4, Math.round(sz * 2 + 2));
         const lut = colorLUT;
@@ -949,9 +1144,11 @@ export default function GridForgeGIS() {
         const drawnBins = useLOD ? new Set() : null;
 
         // Draw non-selected points using color LUT (fast)
+        const hasDescFilter = hiddenDescs.size > 0;
         for (let pi = 0; pi < points.length; pi++) {
           if (selectedPts.has(pi)) continue; // draw selected after
           const p = points[pi];
+          if (hasDescFilter && hiddenDescs.has(String(p.desc || ""))) continue;
           const sx = p.x * scale + vx, sy = p.y * scale + vy;
           if (sx < -10 || sx > w + 10 || sy < -10 || sy > h + 10) continue;
 
@@ -964,7 +1161,7 @@ export default function GridForgeGIS() {
           }
 
           // Color from LUT (no hex parsing, no string creation)
-          const t = bounds ? (p.z - bounds.zMin) / zRange : 0.5;
+          const t = bounds ? (p.z - effectiveZRange.zMin) / zRange : 0.5;
           const ci = Math.max(0, Math.min(255, (t * 255) | 0));
           const r = lut[ci * 3], g = lut[ci * 3 + 1], b = lut[ci * 3 + 2];
           ctx.fillStyle = `rgb(${r},${g},${b})`;
@@ -991,11 +1188,12 @@ export default function GridForgeGIS() {
         }
         // Point labels
         if (gs.showPointNumbers || gs.showPointLevels || gs.showPointDescs) {
-          ctx.font = "bold 9px 'JetBrains Mono',monospace";
+          ctx.font = `bold ${gs.pointLabelSize || 9}px 'JetBrains Mono',monospace`;
           ctx.textAlign = "center";
           let labelCount = 0;
           for (let pi = 0; pi < points.length && labelCount < 2000; pi++) {
             const p = points[pi];
+            if (hasDescFilter && hiddenDescs.has(String(p.desc || ""))) continue;
             const sx = p.x * scale + vx, sy = p.y * scale + vy;
             if (sx < -10 || sx > w + 10 || sy < -10 || sy > h + 10) continue;
             if (useLOD && drawnBins) {
@@ -1216,7 +1414,7 @@ export default function GridForgeGIS() {
 
       // Compass
       if (showCompass) {
-        const cx = w - 36, cy = 62, r = 18;
+        const cx = w - 36, cy = 180, r = 18;
         ctx.beginPath(); ctx.arc(cx, cy, r + 4, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fill();
         ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = isDark ? "rgba(15,22,41,0.9)" : "rgba(255,255,255,0.9)"; ctx.fill();
         ctx.strokeStyle = isDark ? C.panelBorder : "#bcc2cc"; ctx.lineWidth = 1.5; ctx.stroke();
@@ -1246,6 +1444,7 @@ export default function GridForgeGIS() {
   const handleMouseDown = (e) => {
     // Draw mode for boundaries/breaklines
     if (drawMode) {
+      pushHistory();
       const rect = canvasRef.current.getBoundingClientRect();
       let mx = (e.clientX - rect.left - viewState.x) / viewState.scale;
       let my = (e.clientY - rect.top - viewState.y) / viewState.scale;
@@ -1302,6 +1501,36 @@ export default function GridForgeGIS() {
       setMeasurePts(prev => [...prev, [mx, my]]);
       return;
     }
+    // ── Node editing: click near a boundary/breakline vertex to start dragging ──
+    if (!drawMode && !measureMode && !e.shiftKey) {
+      const rect = canvasRef.current.getBoundingClientRect();
+      const screenX = e.clientX - rect.left, screenY = e.clientY - rect.top;
+      const hitRadius = 8; // pixels
+      let bestDist = hitRadius, bestHit = null;
+      // Check boundary vertices
+      for (const b of boundaries) {
+        for (let vi = 0; vi < b.vertices.length; vi++) {
+          const sx = b.vertices[vi][0] * viewState.scale + viewState.x;
+          const sy = b.vertices[vi][1] * viewState.scale + viewState.y;
+          const d = Math.sqrt((sx - screenX) ** 2 + (sy - screenY) ** 2);
+          if (d < bestDist) { bestDist = d; bestHit = { type: "boundary", id: b.id, vertexIdx: vi }; }
+        }
+      }
+      // Check breakline vertices
+      for (const bl of breaklines) {
+        for (let vi = 0; vi < bl.vertices.length; vi++) {
+          const sx = bl.vertices[vi][0] * viewState.scale + viewState.x;
+          const sy = bl.vertices[vi][1] * viewState.scale + viewState.y;
+          const d = Math.sqrt((sx - screenX) ** 2 + (sy - screenY) ** 2);
+          if (d < bestDist) { bestDist = d; bestHit = { type: "breakline", id: bl.id, vertexIdx: vi }; }
+        }
+      }
+      if (bestHit) {
+        pushHistory();
+        nodeEditRef.current = { dragging: true, ...bestHit };
+        return;
+      }
+    }
     if (e.shiftKey) {
       selRef.current = { selecting: true, sx: e.clientX, sy: e.clientY };
       setSelectionBox({ x1: e.clientX - canvasRef.current.getBoundingClientRect().left, y1: e.clientY - canvasRef.current.getBoundingClientRect().top, x2: e.clientX - canvasRef.current.getBoundingClientRect().left, y2: e.clientY - canvasRef.current.getBoundingClientRect().top });
@@ -1329,6 +1558,30 @@ export default function GridForgeGIS() {
         if (isSnapped) setIsSnapped(false);
       }
     }
+    // Node editing drag
+    if (nodeEditRef.current.dragging && rect) {
+      const mx = (e.clientX - rect.left - viewState.x) / viewState.scale;
+      const my = (e.clientY - rect.top - viewState.y) / viewState.scale;
+      const { type, id, vertexIdx } = nodeEditRef.current;
+      if (type === "boundary") {
+        setBoundaries(prev => prev.map(b => {
+          if (b.id !== id) return b;
+          const nv = b.vertices.map((v, i) => i === vertexIdx ? [mx, my] : v);
+          return { ...b, vertices: nv };
+        }));
+      } else if (type === "breakline") {
+        setBreaklines(prev => prev.map(bl => {
+          if (bl.id !== id) return bl;
+          const nv = bl.vertices.map((v, i) => {
+            if (i !== vertexIdx) return v;
+            // Preserve z values for standard/wall breaklines
+            return v.length >= 3 ? [mx, my, ...v.slice(2)] : [mx, my];
+          });
+          return { ...bl, vertices: nv };
+        }));
+      }
+      return;
+    }
     if (selRef.current.selecting && rect) {
       setSelectionBox(prev => prev ? { ...prev, x2: e.clientX - rect.left, y2: e.clientY - rect.top } : null);
       return;
@@ -1338,6 +1591,11 @@ export default function GridForgeGIS() {
     }
   };
   const handleMouseUp = (e) => {
+    // Finish node edit drag
+    if (nodeEditRef.current.dragging) {
+      nodeEditRef.current = { dragging: false, type: null, id: null, vertexIdx: -1 };
+      return;
+    }
     if (selRef.current.selecting && selectionBox) {
       const { x: vx, y: vy, scale: sc } = viewState;
       const x1 = Math.min(selectionBox.x1, selectionBox.x2), x2 = Math.max(selectionBox.x1, selectionBox.x2);
@@ -1383,6 +1641,7 @@ export default function GridForgeGIS() {
   const handleCanvasDblClick = (e) => {
     if (!drawMode || drawPts.length < 2) return;
     e.preventDefault();
+    pushHistory();
     if (drawMode.startsWith("boundary")) {
       if (drawPts.length >= 3) {
         const type = drawMode === "boundary_outer" ? "outer" : "inner";
@@ -1400,6 +1659,7 @@ export default function GridForgeGIS() {
     if (pendingZ) {
       const z = parseFloat(zInputValue);
       if (!isNaN(z)) {
+        pushHistory();
         setDrawPts(prev => [...prev, [pendingZ.x, pendingZ.y, z]]);
       }
       setPendingZ(null); setZInputValue("");
@@ -1408,6 +1668,7 @@ export default function GridForgeGIS() {
 
   const finishWallZ = () => {
     if (!pendingZ) return;
+    pushHistory();
     if (pendingZ.wallMode === "both") {
       const zTop = parseFloat(zInputValue);
       const zBottom = parseFloat(zInputValue2);
@@ -1439,6 +1700,7 @@ export default function GridForgeGIS() {
         }
       }
       if (verts.length < 2) return;
+      pushHistory();
       // Detect type by column count: 4→wall, 3→standard, 2→boundary
       if (maxCols >= 4) {
         setBreaklines(prev => [...prev, { id: Date.now(), name: `Imported Wall Breakline`, breaklineType: "wall", vertices: verts.map(v => [v[0], v[1], v[2] || 0, v[3] || 0]) }]);
@@ -1475,6 +1737,7 @@ export default function GridForgeGIS() {
   };
 
   const loadSample = () => {
+    pushHistory();
     const pts = generateSampleData(500);
     setPoints(pts);
     setAllRows(pts);
@@ -1484,10 +1747,10 @@ export default function GridForgeGIS() {
   };
 
   const toggleLayer = (id) => setLayers(prev => prev.map(l => l.id === id ? { ...l, visible: !l.visible } : l));
-  const removeLayer = (id) => setLayers(prev => prev.filter(l => l.id !== id));
-  const duplicateLayer = (id) => setLayers(prev => { const l = prev.find(x => x.id === id); return l ? [...prev, { ...l, id: Date.now(), name: l.name + " (copy)" }] : prev; });
+  const removeLayer = (id) => { pushHistory(); setLayers(prev => prev.filter(l => l.id !== id)); };
+  const duplicateLayer = (id) => { pushHistory(); setLayers(prev => { const l = prev.find(x => x.id === id); return l ? [...prev, { ...l, id: Date.now(), name: l.name + " (copy)" }] : prev; }); };
   const renameLayer = (id, name) => setLayers(prev => prev.map(l => l.id === id ? { ...l, name } : l));
-  const moveLayer = (id, dir) => setLayers(prev => { const i = prev.findIndex(l => l.id === id); if ((dir < 0 && i > 0) || (dir > 0 && i < prev.length - 1)) { const n = [...prev];[n[i], n[i + dir]] = [n[i + dir], n[i]]; return n; } return prev; });
+  const moveLayer = (id, dir) => { pushHistory(); setLayers(prev => { const i = prev.findIndex(l => l.id === id); if ((dir < 0 && i > 0) || (dir > 0 && i < prev.length - 1)) { const n = [...prev];[n[i], n[i + dir]] = [n[i + dir], n[i]]; return n; } return prev; }); };
 
   // ── Sidebar buttons ────────────────────────────────────────────────────────
   const panelBtns = [
@@ -1550,6 +1813,8 @@ export default function GridForgeGIS() {
           <span>Y: <span ref={coordsYRef} style={{ color: C.green }}></span></span>
         </div>
         <div style={{ display: "flex", gap: 4 }}>
+          <Btn size="sm" onClick={undo} disabled={!canUndo} title="Undo (Ctrl+Z)"><I.Undo /></Btn>
+          <Btn size="sm" onClick={redo} disabled={!canRedo} title="Redo (Ctrl+Shift+Z)"><I.Redo /></Btn>
           {viewMode === "2d" ? <Btn size="sm" onClick={() => setViewMode("3d")} title="3D View"><I.Box3D /> 3D</Btn> : <Btn size="sm" onClick={() => { setViewMode("2d"); setCompMode(null); }} variant="primary"><I.Map /> 2D</Btn>}
           <Btn size="sm" onClick={fitView}><I.Crosshair /> Fit</Btn>
           <Btn size="sm" onClick={() => setSnapEnabled(p => !p)} variant={snapEnabled ? "success" : "default"} title="Snap to points (S)">Snap</Btn>
@@ -1607,6 +1872,28 @@ export default function GridForgeGIS() {
               <div style={{ padding: "8px 12px", background: C.surface, borderRadius: 8, fontSize: 11, color: C.textMuted }}>
                 <span style={{ color: C.accent, fontWeight: 600 }}>{fileName}</span><br />{allRows.length.toLocaleString()} rows · {headers.length} columns
               </div>
+              <div>
+                <Label>Quick Template</Label>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                  {[
+                    { label: "NEZ", cols: { y: 0, x: 1, z: 2 } },
+                    { label: "ENZ", cols: { x: 0, y: 1, z: 2 } },
+                    { label: "PENZ", cols: { pointNo: 0, x: 1, y: 2, z: 3 } },
+                    { label: "PNEZ", cols: { pointNo: 0, y: 1, x: 2, z: 3 } },
+                    { label: "PENZD", cols: { pointNo: 0, x: 1, y: 2, z: 3, desc: 4 } },
+                    { label: "PNEZD", cols: { pointNo: 0, y: 1, x: 2, z: 3, desc: 4 } },
+                  ].filter(t => {
+                    const maxIdx = Math.max(...Object.values(t.cols));
+                    return headers.length > maxIdx;
+                  }).map(t => (
+                    <Btn key={t.label} size="sm" onClick={() => {
+                      const m = { x: "", y: "", z: "", pointNo: "", desc: "" };
+                      for (const [field, idx] of Object.entries(t.cols)) m[field] = headers[idx];
+                      setColumnMapping(m);
+                    }} style={{ fontSize: 10, padding: "3px 8px" }}>{t.label}</Btn>
+                  ))}
+                </div>
+              </div>
               {projectCRS !== "LOCAL" && <div>
                 <Label>File CRS</Label>
                 <CRSPicker value={fileCRS} onChange={setFileCRS} />
@@ -1651,11 +1938,36 @@ export default function GridForgeGIS() {
                   <span style={{ flex: 1, fontSize: 11, fontWeight: 500 }}>{b.name}</span>
                   <span style={{ fontSize: 9, color: C.textDim, textTransform: "uppercase" }}>{b.type}</span>
                   <span style={{ fontSize: 9, color: C.textMuted }}>{b.vertices.length} pts</span>
-                  <button onClick={() => setBoundaries(prev => prev.filter(x => x.id !== b.id))} style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer", display: "flex", padding: 2 }} title="Delete"><I.Trash /></button>
+                  <button onClick={() => { pushHistory(); setBoundaries(prev => prev.filter(x => x.id !== b.id)); }} style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer", display: "flex", padding: 2 }} title="Delete"><I.Trash /></button>
                 </div>)}
                 <div style={{ display: "flex", gap: 6 }}>
                   <Btn size="sm" onClick={() => { setDrawMode("boundary_outer"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); }} variant={drawMode === "boundary_outer" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center" }}>Outer</Btn>
                   <Btn size="sm" onClick={() => { setDrawMode("boundary_inner"); setDrawPts([]); setMeasureMode(null); setMeasurePts([]); }} variant={drawMode === "boundary_inner" ? "primary" : "default"} style={{ flex: 1, justifyContent: "center" }}>Inner</Btn>
+                </div>
+                <div style={{ marginTop: 6, padding: 8, background: C.surface, borderRadius: 6, border: `1px solid ${C.panelBorder}` }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                    <span style={{ fontSize: 10, color: C.textMuted, fontWeight: 600, textTransform: "uppercase", letterSpacing: 0.5 }}>Auto Generate</span>
+                  </div>
+                  <Sld label="Concavity" value={gs.autoBoundaryConcavity ?? 0} onChange={v => updateGs("autoBoundaryConcavity", v)} min={0} max={1} step={0.05} />
+                  <div style={{ fontSize: 9, color: C.textDim, marginBottom: 6 }}>0 = convex hull, 1 = tightest fit</div>
+                  <Btn size="sm" onClick={() => {
+                    if (points.length < 3) return;
+                    pushHistory();
+                    const concavity = gs.autoBoundaryConcavity ?? 0;
+                    const verts = concavity <= 0
+                      ? computeConvexHull(points)
+                      : computeConcaveHull(points, concavity);
+                    if (verts.length >= 3) {
+                      setBoundaries(prev => [...prev, {
+                        id: Date.now(),
+                        name: `Auto ${concavity <= 0 ? "Convex" : "Concave"} Boundary`,
+                        type: "outer",
+                        vertices: verts
+                      }]);
+                    }
+                  }} disabled={points.length < 3} style={{ width: "100%", justifyContent: "center" }} variant="primary">
+                    <I.Boundary /> Auto Boundary
+                  </Btn>
                 </div>
               </Section>
               <Section title="Breaklines">
@@ -1668,7 +1980,7 @@ export default function GridForgeGIS() {
                     <span style={{ flex: 1, fontSize: 11, fontWeight: 500 }}>{bl.name}</span>
                     <span style={{ fontSize: 8, color: typeColor, textTransform: "uppercase", padding: "1px 4px", background: typeColor + "18", borderRadius: 3, fontWeight: 600 }}>{bType}</span>
                     <span style={{ fontSize: 9, color: C.textMuted }}>{bl.vertices.length} pts</span>
-                    <button onClick={() => setBreaklines(prev => prev.filter(x => x.id !== bl.id))} style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer", display: "flex", padding: 2 }} title="Delete"><I.Trash /></button>
+                    <button onClick={() => { pushHistory(); setBreaklines(prev => prev.filter(x => x.id !== bl.id)); }} style={{ background: "none", border: "none", color: C.textDim, cursor: "pointer", display: "flex", padding: 2 }} title="Delete"><I.Trash /></button>
                   </div>;
                 })}
                 <div style={{ display: "flex", gap: 4 }}>
@@ -1758,6 +2070,14 @@ export default function GridForgeGIS() {
                 <Label>Contour Interval</Label>
                 <input type="number" value={gs.contourInterval} onChange={e => updateGs("contourInterval", +e.target.value)} />
               </div>
+              <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                <Label style={{ marginRight: "auto", alignSelf: "center" }}>Method</Label>
+                {["grid", "tin"].map(m => (
+                  <Btn key={m} size="sm" onClick={() => updateGs("contourMethod", m)} style={{ flex: 1, justifyContent: "center", fontSize: 10, background: gs.contourMethod === m ? C.accent + "33" : C.surface, border: gs.contourMethod === m ? `1px solid ${C.accent}` : `1px solid ${C.panelBorder}`, color: gs.contourMethod === m ? C.accent : C.textMuted }}>
+                    {m === "grid" ? "Grid" : "TIN"}
+                  </Btn>
+                ))}
+              </div>
               <Sld label="Smoothing" value={gs.contourSmoothing} onChange={v => updateGs("contourSmoothing", v)} min={0} max={1} step={0.1} />
               <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12, cursor: "pointer" }}>
                 <input type="checkbox" checked={gs.showFilledContours} onChange={() => updateGs("showFilledContours", !gs.showFilledContours)} style={{ accentColor: C.accent }} /> Filled Contours
@@ -1777,6 +2097,36 @@ export default function GridForgeGIS() {
                     <div style={{ width: 100, height: 12, borderRadius: 3, background: `linear-gradient(90deg,${COLOR_RAMPS[name].join(",")})` }} />
                     <span style={{ fontSize: 10, color: gs.colorRamp === name ? C.accent : C.textMuted, textTransform: "capitalize" }}>{name}</span>
                   </div>)}
+                </div>
+              </Section>
+              <Section title="Color Range">
+                <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
+                  {["auto", "manual"].map(m => (
+                    <Btn key={m} size="sm" onClick={() => {
+                      if (m === "manual" && gs.rampMode === "auto" && gridData) {
+                        updateGs("rampMin", +gridData.zMin.toFixed(2));
+                        updateGs("rampMax", +gridData.zMax.toFixed(2));
+                      }
+                      updateGs("rampMode", m);
+                    }} style={{ flex: 1, justifyContent: "center", fontSize: 10, background: gs.rampMode === m ? C.accent + "33" : C.surface, border: gs.rampMode === m ? `1px solid ${C.accent}` : `1px solid ${C.panelBorder}`, color: gs.rampMode === m ? C.accent : C.textMuted }}>
+                      {m === "auto" ? "Auto" : "Manual"}
+                    </Btn>
+                  ))}
+                </div>
+                {gs.rampMode === "manual" && <div style={{ display: "flex", gap: 6 }}>
+                  <div style={{ flex: 1 }}>
+                    <Label>Min</Label>
+                    <input type="number" value={gs.rampMin} onChange={e => updateGs("rampMin", +e.target.value)} step="any"
+                      style={{ width: "100%", background: C.surface, color: C.text, border: `1px solid ${C.panelBorder}`, borderRadius: 4, padding: "4px 6px", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", outline: "none" }} />
+                  </div>
+                  <div style={{ flex: 1 }}>
+                    <Label>Max</Label>
+                    <input type="number" value={gs.rampMax} onChange={e => updateGs("rampMax", +e.target.value)} step="any"
+                      style={{ width: "100%", background: C.surface, color: C.text, border: `1px solid ${C.panelBorder}`, borderRadius: 4, padding: "4px 6px", fontSize: 11, fontFamily: "'JetBrains Mono',monospace", outline: "none" }} />
+                  </div>
+                </div>}
+                <div style={{ fontSize: 10, color: C.textDim, marginTop: 4 }}>
+                  Range: {effectiveZRange.zMin.toFixed(2)} → {effectiveZRange.zMax.toFixed(2)}
                 </div>
               </Section>
               <Btn onClick={runGridding} variant="primary" disabled={points.length === 0 || gridding} style={{ width: "100%", justifyContent: "center", padding: "10px 14px" }}>
@@ -1843,7 +2193,34 @@ export default function GridForgeGIS() {
                     <input type="checkbox" checked={gs[o.k]} onChange={() => updateGs(o.k, !gs[o.k])} style={{ accentColor: C.accent }} />{o.l}
                   </label>
                 )}
+                <Sld label="Label Size" value={gs.pointLabelSize || 9} onChange={v => updateGs("pointLabelSize", v)} min={6} max={24} />
               </Section>
+              {uniqueDescs.length > 0 && <Section title="Description Filter">
+                <div style={{ display: "flex", gap: 4, marginBottom: 4 }}>
+                  <Btn size="sm" onClick={() => setHiddenDescs(new Set())} style={{ flex: 1, justifyContent: "center", fontSize: 9 }}>All</Btn>
+                  <Btn size="sm" onClick={() => setHiddenDescs(new Set(uniqueDescs))} style={{ flex: 1, justifyContent: "center", fontSize: 9 }}>None</Btn>
+                </div>
+                <div style={{ maxHeight: 180, overflow: "auto", display: "flex", flexDirection: "column", gap: 2 }}>
+                  {uniqueDescs.map(d => (
+                    <label key={d} style={{ display: "flex", alignItems: "center", gap: 6, padding: "3px 0", cursor: "pointer", fontSize: 11 }}>
+                      <input type="checkbox" checked={!hiddenDescs.has(d)} onChange={() => {
+                        setHiddenDescs(prev => {
+                          const next = new Set(prev);
+                          next.has(d) ? next.delete(d) : next.add(d);
+                          return next;
+                        });
+                      }} style={{ accentColor: C.accent }} />
+                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{d}</span>
+                      <span style={{ fontSize: 9, color: C.textDim, marginLeft: "auto", flexShrink: 0 }}>
+                        {points.filter(p => String(p.desc) === d).length}
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                <div style={{ fontSize: 10, color: C.textDim, marginTop: 4 }}>
+                  Showing {filteredPoints.length.toLocaleString()} / {points.length.toLocaleString()} points
+                </div>
+              </Section>}
               <Section title="Style Presets">
                 <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                   {STYLE_PRESETS.map(p => <Btn key={p.name} size="sm" onClick={() => setGs(prev => ({ ...prev, colorRamp: p.ramp, showContours: p.showContours, showRaster: p.showRaster, showFilledContours: p.showFilled, showHillshade: p.showHillshade }))} style={{ width: "100%", justifyContent: "flex-start" }}>
@@ -2086,6 +2463,7 @@ export default function GridForgeGIS() {
                         if (isEditing) {
                           return <td key={col} style={{ padding: "1px 4px", textAlign: align }}><input autoFocus defaultValue={p[col] ?? ""} onBlur={e => {
                             const val = e.target.value;
+                            pushHistory();
                             setPoints(prev => prev.map((pt, pi) => pi === idx ? { ...pt, [col]: (col === "x" || col === "y" || col === "z") ? (isNaN(parseFloat(val)) ? pt[col] : parseFloat(val)) : val } : pt));
                             setEditingCell(null);
                           }} onKeyDown={e => { if (e.key === "Enter") e.target.blur(); if (e.key === "Escape") setEditingCell(null); }} style={{ width: "100%", background: C.bg, border: `1px solid ${C.accent}`, borderRadius: 3, padding: "1px 4px", fontSize: 11, color: C.text, outline: "none", fontFamily: "'JetBrains Mono',monospace", textAlign: align }} /></td>;
