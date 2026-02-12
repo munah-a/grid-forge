@@ -200,6 +200,46 @@ function handleContours({ grid, gridX, gridY, nx, ny, stats, contourInterval, co
   });
 }
 
+function handleTriangulateForExport(data) {
+  const { points, breaklines } = data;
+  self.postMessage({ type: "progress", percent: 5, stage: "Preparing TIN export…" });
+
+  let inputPts = points;
+  let constraintEdges = null;
+  if (breaklines && breaklines.length > 0) {
+    // Use a reasonable default cell size for densification
+    let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
+    for (const p of points) {
+      if (p.x < xMin) xMin = p.x; if (p.x > xMax) xMax = p.x;
+      if (p.y < yMin) yMin = p.y; if (p.y > yMax) yMax = p.y;
+    }
+    const span = Math.max(xMax - xMin, yMax - yMin) || 1;
+    const cellSize = span / 200;
+    const result = processBreaklines(breaklines, cellSize, points);
+    inputPts = [...points, ...result.extra];
+    if (result.constraintEdges.length > 0) constraintEdges = result.constraintEdges;
+  }
+
+  self.postMessage({ type: "progress", percent: 10, stage: "Triangulating…" });
+  const tin = delaunayTriangulate(inputPts, (pct) => {
+    self.postMessage({ type: "progress", percent: 10 + pct * 0.85, stage: "Triangulating…" });
+  }, constraintEdges);
+
+  self.postMessage({ type: "progress", percent: 98, stage: "Finishing…" });
+  self.postMessage({
+    type: "tinExportResult",
+    tin: {
+      v0: Array.from(tin.v0),
+      v1: Array.from(tin.v1),
+      v2: Array.from(tin.v2),
+      count: tin.count,
+      px: Array.from(tin.px),
+      py: Array.from(tin.py),
+      pz: Array.from(tin.pz),
+    },
+  });
+}
+
 self.onmessage = (e) => {
   const data = e.data;
   const msgType = data.type || "default";
@@ -209,6 +249,8 @@ self.onmessage = (e) => {
       handleGrid(data.points, data.bounds, data.gs, data.boundaries, data.breaklines);
     } else if (msgType === "contours") {
       handleContours(data);
+    } else if (msgType === "triangulateForExport") {
+      handleTriangulateForExport(data);
     } else {
       // Default: backward-compatible combined operation
       // Run grid first

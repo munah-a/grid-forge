@@ -1552,6 +1552,127 @@ export function gridToASCII(grid, gridX, gridY, nx, ny) {
   return lines.join('\n');
 }
 
+/** Export interpolated grid nodes as X,Y,Z CSV (skips NaN cells) */
+export function gridPointsToCSV(grid, gridX, gridY, nx, ny) {
+  const rows = ["X,Y,Z"];
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const v = grid[j * nx + i];
+      if (!isNaN(v)) rows.push(`${gridX[i]},${gridY[j]},${v.toFixed(4)}`);
+    }
+  }
+  return rows.join('\n');
+}
+
+/** Export interpolated grid nodes as PNEZD for Civil 3D (PointNumber,Northing,Easting,Elevation,Description) */
+export function gridPointsToPNEZD(grid, gridX, gridY, nx, ny) {
+  const rows = [];
+  let num = 1;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const v = grid[j * nx + i];
+      if (!isNaN(v)) rows.push(`${num++},${gridY[j].toFixed(4)},${gridX[i].toFixed(4)},${v.toFixed(4)},GRID`);
+    }
+  }
+  return rows.join('\n');
+}
+
+/** Export raw input points as PNEZD for Civil 3D */
+export function pointsToPNEZD(points) {
+  const rows = [];
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    const num = p.pointNo != null ? p.pointNo : i + 1;
+    const desc = p.desc || "";
+    rows.push(`${num},${p.y.toFixed(4)},${p.x.toFixed(4)},${p.z.toFixed(4)},${desc}`);
+  }
+  return rows.join('\n');
+}
+
+/** Escape special XML characters */
+function escapeXml(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&apos;");
+}
+
+/** LandXML 1.2 TIN surface from regular grid topology (no Delaunay needed) */
+export function gridToLandXML(grid, gridX, gridY, nx, ny, surfaceName) {
+  const name = escapeXml(surfaceName || "GridSurface");
+  const pnts = [];
+  const faces = [];
+  // Build point ID map: grid index -> 1-based ID (only valid cells)
+  const idMap = new Int32Array(nx * ny).fill(-1);
+  let nextId = 1;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const idx = j * nx + i;
+      if (!isNaN(grid[idx])) {
+        idMap[idx] = nextId++;
+        pnts.push(`<P id="${idMap[idx]}">${gridY[j].toFixed(4)} ${gridX[i].toFixed(4)} ${grid[idx].toFixed(4)}</P>`);
+      }
+    }
+  }
+  // Build faces: each cell split into 2 triangles
+  for (let j = 0; j < ny - 1; j++) {
+    for (let i = 0; i < nx - 1; i++) {
+      const bl = j * nx + i, br = bl + 1;
+      const tl = (j + 1) * nx + i, tr = tl + 1;
+      if (idMap[bl] < 0 || idMap[br] < 0 || idMap[tl] < 0 || idMap[tr] < 0) continue;
+      faces.push(`<F>${idMap[bl]} ${idMap[br]} ${idMap[tl]}</F>`);
+      faces.push(`<F>${idMap[br]} ${idMap[tr]} ${idMap[tl]}</F>`);
+    }
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<LandXML version="1.2" xmlns="http://www.landxml.org/schema/LandXML-1.2">
+  <Units><Metric areaUnit="squareMeter" linearUnit="meter" volumeUnit="cubicMeter"/></Units>
+  <Application name="GridForge GIS" version="1.0.0"/>
+  <Surfaces>
+    <Surface name="${name}">
+      <Definition surfType="TIN">
+        <Pnts>${pnts.join('')}</Pnts>
+        <Faces>${faces.join('')}</Faces>
+      </Definition>
+    </Surface>
+  </Surfaces>
+</LandXML>`;
+}
+
+/** LandXML 1.2 TIN surface from delaunayTriangulate() result */
+export function tinToLandXML(tin, surfaceName) {
+  const name = escapeXml(surfaceName || "TINSurface");
+  // Collect referenced point indices and re-index to 1-based
+  const usedSet = new Set();
+  for (let i = 0; i < tin.count; i++) {
+    usedSet.add(tin.v0[i]);
+    usedSet.add(tin.v1[i]);
+    usedSet.add(tin.v2[i]);
+  }
+  const reindex = new Map();
+  const pnts = [];
+  let nextId = 1;
+  for (const idx of usedSet) {
+    reindex.set(idx, nextId);
+    pnts.push(`<P id="${nextId}">${tin.py[idx].toFixed(4)} ${tin.px[idx].toFixed(4)} ${tin.pz[idx].toFixed(4)}</P>`);
+    nextId++;
+  }
+  const faces = [];
+  for (let i = 0; i < tin.count; i++) {
+    faces.push(`<F>${reindex.get(tin.v0[i])} ${reindex.get(tin.v1[i])} ${reindex.get(tin.v2[i])}</F>`);
+  }
+  return `<?xml version="1.0" encoding="UTF-8"?>
+<LandXML version="1.2" xmlns="http://www.landxml.org/schema/LandXML-1.2">
+  <Units><Metric areaUnit="squareMeter" linearUnit="meter" volumeUnit="cubicMeter"/></Units>
+  <Application name="GridForge GIS" version="1.0.0"/>
+  <Surfaces>
+    <Surface name="${name}">
+      <Definition surfType="TIN">
+        <Pnts>${pnts.join('')}</Pnts>
+        <Faces>${faces.join('')}</Faces>
+      </Definition>
+    </Surface>
+  </Surfaces>
+</LandXML>`;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // PROJECT SERIALIZATION
 // ═══════════════════════════════════════════════════════════════════════════════

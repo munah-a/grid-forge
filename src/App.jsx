@@ -10,6 +10,7 @@ import {
   buildColorLUT,
   gridMath, resampleGrid,
   pointsToCSV, pointsToGeoJSON, contoursToGeoJSON, gridToASCII, breaklinesToCSV, breaklinesToGeoJSON,
+  gridPointsToCSV, gridPointsToPNEZD, pointsToPNEZD, tinToLandXML, gridToLandXML,
   serializeProject, deserializeProject,
   measureDistance, measurePolylineLength, measurePolygonArea,
   project3D, generateSampleData,
@@ -310,6 +311,9 @@ export default function GridForgeGIS() {
   const [tinSelection, setTinSelection] = useState(null); // { type: "triangle"|"edge"|"vertex", index, edgeVerts?, preview? }
   const [showTinMesh, setShowTinMesh] = useState(true);
   const [tinZInput, setTinZInput] = useState("");
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
+  const [exportStage, setExportStage] = useState("");
 
   const canvasRef = useRef(null);
   const containerRef = useRef(null);
@@ -856,6 +860,38 @@ export default function GridForgeGIS() {
   const saveProject = () => {
     const state = { points, gridData, contourData, filledContourData, hillshadeData, gridStats, layers, gs, viewState, baseMap, fileName, boundaries, breaklines, projectCRS };
     downloadFile(serializeProject(state), `${fileName || "project"}.gfproj`, "application/json");
+  };
+
+  const exportLandXMLTIN = (source) => {
+    const base = fileName || "surface";
+    if (source === "grid") {
+      if (!gridData) return;
+      const xml = gridToLandXML(gridData.grid, gridData.gridX, gridData.gridY, gridData.nx, gridData.ny, base);
+      downloadFile(xml, `${base}-grid.xml`, "application/xml");
+    } else if (source === "raw") {
+      if (points.length < 3 || exporting) return;
+      setExporting(true);
+      setExportProgress(0);
+      setExportStage("Starting…");
+      const w = new Worker(new URL("./gridding.worker.js", import.meta.url), { type: "module" });
+      w.onmessage = (e) => {
+        const msg = e.data;
+        if (msg.type === "progress") {
+          setExportProgress(msg.percent);
+          setExportStage(msg.stage || "");
+        } else if (msg.type === "tinExportResult") {
+          const xml = tinToLandXML(msg.tin, base);
+          downloadFile(xml, `${base}-tin.xml`, "application/xml");
+          setExporting(false);
+          w.terminate();
+        } else if (msg.type === "error") {
+          alert("TIN export failed: " + msg.message);
+          setExporting(false);
+          w.terminate();
+        }
+      };
+      w.postMessage({ type: "triangulateForExport", points, breaklines });
+    }
   };
 
   const loadProject = (file) => {
@@ -2942,17 +2978,40 @@ export default function GridForgeGIS() {
             {/* ── Export Panel ──────────────────────────────────────────── */}
             {activePanel === "export" && <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               <Label>Export Data</Label>
-              <Btn onClick={() => downloadFile(pointsToCSV(points), "points.csv")} disabled={points.length === 0} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Points as CSV</Btn>
+              <Btn onClick={() => downloadFile(pointsToCSV(points), `${fileName || "survey"}-points.csv`)} disabled={points.length === 0} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Points as CSV</Btn>
               <Btn onClick={() => {
                 const exportPts = projectCRS !== "LOCAL" && projectCRS !== "EPSG:4326" ? transformPoints(points, projectCRS, "EPSG:4326") : points;
-                downloadFile(pointsToGeoJSON(exportPts), "points.geojson");
+                downloadFile(pointsToGeoJSON(exportPts), `${fileName || "survey"}-points.geojson`);
               }} disabled={points.length === 0} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Points as GeoJSON</Btn>
-              <Btn onClick={() => downloadFile(contoursToGeoJSON(contourData || []), "contours.geojson")} disabled={!contourData} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Contours as GeoJSON</Btn>
-              <Btn onClick={() => { if (gridData) downloadFile(gridToASCII(gridData.grid, gridData.gridX, gridData.gridY, gridData.nx, gridData.ny), "grid.asc") }} disabled={!gridData} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Grid as ASCII</Btn>
-              <Btn onClick={() => downloadFile(breaklinesToCSV(breaklines), "breaklines.csv")} disabled={breaklines.length === 0} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Breaklines as CSV</Btn>
-              <Btn onClick={() => downloadFile(breaklinesToGeoJSON(breaklines), "breaklines.geojson")} disabled={breaklines.length === 0} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Breaklines as GeoJSON</Btn>
-              <Label>Export Map</Label>
-              <Btn onClick={exportPNG} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Map as PNG</Btn>
+              <Btn onClick={() => downloadFile(contoursToGeoJSON(contourData || []), `${fileName || "survey"}-contours.geojson`)} disabled={!contourData} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Contours as GeoJSON</Btn>
+              <Btn onClick={() => { if (gridData) downloadFile(gridToASCII(gridData.grid, gridData.gridX, gridData.gridY, gridData.nx, gridData.ny), `${fileName || "survey"}-grid.asc`) }} disabled={!gridData} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Grid as ASCII</Btn>
+              <Btn onClick={() => downloadFile(breaklinesToCSV(breaklines), `${fileName || "survey"}-breaklines.csv`)} disabled={breaklines.length === 0} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Breaklines as CSV</Btn>
+              <Btn onClick={() => downloadFile(breaklinesToGeoJSON(breaklines), `${fileName || "survey"}-breaklines.geojson`)} disabled={breaklines.length === 0} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Breaklines as GeoJSON</Btn>
+
+              <div style={{ borderTop: `1px solid ${C.panelBorder}`, paddingTop: 12, marginTop: 4 }}>
+                <Label>Civil 3D Export</Label>
+                <div style={{ fontSize: 10, color: C.textDim, marginBottom: 6 }}>Formats compatible with Autodesk Civil 3D</div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                  <Btn onClick={() => { if (gridData) downloadFile(gridPointsToCSV(gridData.grid, gridData.gridX, gridData.gridY, gridData.nx, gridData.ny), `${fileName || "surface"}-grid-points.csv`) }} disabled={!gridData} style={{ width: "100%", justifyContent: "center" }} title="X,Y,Z CSV of interpolated grid nodes"><I.Download /> Grid Points as CSV</Btn>
+                  <Btn onClick={() => { if (gridData) downloadFile(gridPointsToPNEZD(gridData.grid, gridData.gridX, gridData.gridY, gridData.nx, gridData.ny), `${fileName || "surface"}-grid-pnezd.csv`) }} disabled={!gridData} style={{ width: "100%", justifyContent: "center" }} title="PointNumber,Northing,Easting,Elevation,Description — Civil 3D point import format"><I.Download /> Grid Points as PNEZD</Btn>
+                  <Btn onClick={() => downloadFile(pointsToPNEZD(points), `${fileName || "surface"}-points-pnezd.csv`)} disabled={points.length === 0} style={{ width: "100%", justifyContent: "center" }} title="Raw survey points in PNEZD format for Civil 3D"><I.Download /> Points as PNEZD</Btn>
+                  <Btn onClick={() => exportLandXMLTIN("raw")} disabled={points.length < 3 || exporting} style={{ width: "100%", justifyContent: "center" }} title="LandXML TIN surface from raw point triangulation (Delaunay with breakline constraints)"><I.Download /> TIN Surface (LandXML)</Btn>
+                  <Btn onClick={() => exportLandXMLTIN("grid")} disabled={!gridData} style={{ width: "100%", justifyContent: "center" }} title="LandXML TIN surface from interpolated grid topology (instant, no triangulation needed)"><I.Download /> Grid Surface (LandXML)</Btn>
+                  <Btn onClick={() => { if (gridData) downloadFile(gridToASCII(gridData.grid, gridData.gridX, gridData.gridY, gridData.nx, gridData.ny), `${fileName || "surface"}-dem.asc`) }} disabled={!gridData} style={{ width: "100%", justifyContent: "center" }} title="ESRI ASCII grid — import in Civil 3D via 'Add surface from DEM file'"><I.Download /> DEM for Civil 3D (.asc)</Btn>
+                </div>
+                {exporting && <div style={{ marginTop: 8, padding: 8, background: C.surface, borderRadius: 6 }}>
+                  <div style={{ fontSize: 10, color: C.textMuted, marginBottom: 4 }}>{exportStage}</div>
+                  <div style={{ width: "100%", height: 4, background: C.panelBorder, borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{ width: `${exportProgress}%`, height: "100%", background: C.accent, borderRadius: 2, transition: "width 0.3s" }} />
+                  </div>
+                  <div style={{ fontSize: 9, color: C.textDim, marginTop: 2, textAlign: "right" }}>{Math.round(exportProgress)}%</div>
+                </div>}
+              </div>
+
+              <div style={{ borderTop: `1px solid ${C.panelBorder}`, paddingTop: 12, marginTop: 4 }}>
+                <Label>Export Map</Label>
+                <Btn onClick={exportPNG} style={{ width: "100%", justifyContent: "center" }}><I.Download /> Map as PNG</Btn>
+              </div>
               <div style={{ borderTop: `1px solid ${C.panelBorder}`, paddingTop: 12, marginTop: 4 }}>
                 <Label>Project</Label>
                 <Btn onClick={saveProject} variant="primary" style={{ width: "100%", justifyContent: "center", marginBottom: 8 }}><I.Save /> Save Project</Btn>
