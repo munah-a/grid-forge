@@ -98,6 +98,7 @@ const I = {
   Bug: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>,
   Undo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>,
   Redo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10" /></svg>,
+  HelpCircle: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>,
 };
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -1414,13 +1415,13 @@ export default function GridForgeGIS() {
 
       // Compass
       if (showCompass) {
-        const cx = w - 36, cy = 180, r = 18;
-        ctx.beginPath(); ctx.arc(cx, cy, r + 4, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fill();
+        const cx = w - 80, cy = 60, r = 36;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fill();
         ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = isDark ? "rgba(15,22,41,0.9)" : "rgba(255,255,255,0.9)"; ctx.fill();
-        ctx.strokeStyle = isDark ? C.panelBorder : "#bcc2cc"; ctx.lineWidth = 1.5; ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(cx, cy - r + 5); ctx.lineTo(cx - 5, cy); ctx.lineTo(cx + 5, cy); ctx.closePath(); ctx.fillStyle = C.accent; ctx.fill();
-        ctx.beginPath(); ctx.moveTo(cx, cy + r - 5); ctx.lineTo(cx - 5, cy); ctx.lineTo(cx + 5, cy); ctx.closePath(); ctx.fillStyle = isDark ? "#334155" : "#94a3b8"; ctx.fill();
-        ctx.font = "bold 8px 'DM Sans',sans-serif"; ctx.fillStyle = C.accent; ctx.textAlign = "center"; ctx.fillText("N", cx, cy - r + 2);
+        ctx.strokeStyle = isDark ? C.panelBorder : "#bcc2cc"; ctx.lineWidth = 2; ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(cx, cy - r + 10); ctx.lineTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.closePath(); ctx.fillStyle = C.accent; ctx.fill();
+        ctx.beginPath(); ctx.moveTo(cx, cy + r - 10); ctx.lineTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.closePath(); ctx.fillStyle = isDark ? "#334155" : "#94a3b8"; ctx.fill();
+        ctx.font = "bold 14px 'DM Sans',sans-serif"; ctx.fillStyle = C.accent; ctx.textAlign = "center"; ctx.fillText("N", cx, cy - r + 6);
       }
     }); // end requestAnimationFrame
     return () => { if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); };
@@ -1758,7 +1759,7 @@ export default function GridForgeGIS() {
     { id: "boundaries", icon: I.Boundary, label: "Bounds" },
     { id: "layers", icon: I.Layers, label: "Layers" }, { id: "style", icon: I.Settings, label: "Style" },
     { id: "export", icon: I.Download, label: "Export" }, { id: "compare", icon: I.Columns, label: "Compare" },
-    { id: "measure", icon: I.Ruler, label: "Measure" },
+    { id: "measure", icon: I.Ruler, label: "Measure" }, { id: "help", icon: I.HelpCircle, label: "Help" },
   ];
 
   // Algorithm-specific parameter controls
@@ -1848,6 +1849,7 @@ export default function GridForgeGIS() {
             {activePanel === "export" && <><I.Download /> Export</>}
             {activePanel === "compare" && <><I.Columns /> Algorithm Comparison</>}
             {activePanel === "measure" && <><I.Ruler /> Measure</>}
+            {activePanel === "help" && <><I.HelpCircle /> Help Guide</>}
           </div>
           <div style={{ flex: 1, overflow: "auto", padding: 16 }}>
 
@@ -2284,6 +2286,62 @@ export default function GridForgeGIS() {
                 </div>
               </div>}
             </div>}
+
+            {/* ── Help Panel ──────────────────────────────────────────── */}
+            {activePanel === "help" && <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              {[
+                { title: "Getting Started", content: [
+                  "1. Import Data — Click Import in the sidebar and drop a CSV, GeoJSON, or open a saved .gfproj file. Your point data (X, Y, Z) will appear on the canvas.",
+                  "2. Column Mapping — After import, map your file columns to X (Easting), Y (Northing), Z (Elevation), and optional Number / Level / Description fields.",
+                  "3. Set CRS — Choose a Coordinate Reference System if your data uses projected coordinates. This enables basemap alignment.",
+                  "4. Run Gridding — Open the Grid panel, pick an algorithm, set resolution, and click Run. The interpolated surface renders on the canvas.",
+                ]},
+                { title: "Keyboard Shortcuts", content: [
+                  "Ctrl + Z — Undo last action",
+                  "Ctrl + Shift + Z — Redo",
+                  "S — Toggle snap-to-point mode",
+                  "Scroll wheel — Zoom in / out at cursor",
+                  "Double-click — Place a point at cursor location",
+                  "Click + drag — Pan the map",
+                  "Shift + click-drag — Box select points",
+                ]},
+                { title: "Gridding Algorithms", content: [
+                  "IDW — Inverse Distance Weighting. Fast, general-purpose interpolator. Nearby points have more influence.",
+                  "Natural Neighbor — Smooth interpolation based on Voronoi tessellation. Good for scattered data.",
+                  "Minimum Curvature — Generates the smoothest possible surface through data points. Common in geoscience.",
+                  "Kriging (Ordinary / Universal / Simple) — Geostatistical methods that model spatial correlation via variograms.",
+                  "RBF — Radial Basis Functions. Flexible exact interpolator with multiple kernel choices.",
+                  "TIN — Triangulated Irregular Network. Linear interpolation within Delaunay triangles.",
+                  "Nearest Neighbor — Assigns each cell the value of the closest data point.",
+                  "Moving Average — Averages points within a search radius. Produces a smoothed surface.",
+                  "Polynomial Regression — Fits a polynomial trend surface to the data.",
+                  "Modified Shepard's — Enhanced IDW with local polynomial corrections.",
+                  "Data Metrics — Bins data into grid cells and computes a statistic (mean, min, max, etc.).",
+                ]},
+                { title: "Map Controls", content: [
+                  "Zoom +/− — Buttons at top-right, or scroll wheel",
+                  "Fit View — Resets zoom to show all data points",
+                  "Compass — Toggleable north indicator on the canvas",
+                  "Basemap — Choose None, OSM, or Satellite imagery underlay",
+                  "3D View — Switch to a perspective 3D view with tilt, rotation, and vertical exaggeration controls",
+                ]},
+                { title: "Export", content: [
+                  "CSV — Export point data as comma-separated values",
+                  "GeoJSON — Points or contour lines in GeoJSON format",
+                  "Esri ASCII Grid — Standard .asc raster format for GIS software",
+                  "Project File — Save the full project (.gfproj) including data, grid, and settings",
+                ]},
+              ].map(section => (
+                <div key={section.title}>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: C.accent, marginBottom: 6 }}>{section.title}</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                    {section.content.map((line, i) => (
+                      <div key={i} style={{ fontSize: 11, color: C.textMuted, lineHeight: 1.5, paddingLeft: 4 }}>{line}</div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>}
           </div>
         </div>}
 
@@ -2294,11 +2352,11 @@ export default function GridForgeGIS() {
 
           {/* Map toolbar */}
           <div style={{ position: "absolute", top: 12, right: 12, display: "flex", flexDirection: "column", gap: 4, zIndex: 10 }}>
-            {[{ label: "+", fn: () => setViewState(p => ({ ...p, scale: p.scale * 1.3 })) }, { label: "−", fn: () => setViewState(p => ({ ...p, scale: p.scale * 0.7 })) }, { label: null, fn: fitView, icon: I.Crosshair }].map((b, i) =>
-              <button key={i} onClick={b.fn} style={{ width: 32, height: 32, borderRadius: 6, border: `1px solid ${C.panelBorder}`, background: C.panel + "dd", color: C.text, cursor: "pointer", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{b.icon ? <b.icon /> : b.label}</button>
+            {[{ label: "+", fn: () => setViewState(p => ({ ...p, scale: p.scale * 1.3 })), tip: "Zoom In" }, { label: "−", fn: () => setViewState(p => ({ ...p, scale: p.scale * 0.7 })), tip: "Zoom Out" }, { label: null, fn: fitView, icon: I.Crosshair, tip: "Fit View" }].map((b, i) =>
+              <button key={i} onClick={b.fn} title={b.tip} style={{ width: 32, height: 32, borderRadius: 6, border: `1px solid ${C.panelBorder}`, background: C.panel + "dd", color: C.text, cursor: "pointer", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 16 }}>{b.icon ? <b.icon /> : b.label}</button>
             )}
             <div style={{ height: 4 }} />
-            <button onClick={() => setShowCompass(p => !p)} style={{ width: 32, height: 32, borderRadius: 6, border: `1px solid ${showCompass ? C.accent + "55" : C.panelBorder}`, background: showCompass ? C.accent + "18" : C.panel + "dd", color: showCompass ? C.accent : C.textMuted, cursor: "pointer", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center" }}><I.Compass /></button>
+            <button onClick={() => setShowCompass(p => !p)} title="Toggle Compass" style={{ width: 32, height: 32, borderRadius: 6, border: `1px solid ${showCompass ? C.accent + "55" : C.panelBorder}`, background: showCompass ? C.accent + "18" : C.panel + "dd", color: showCompass ? C.accent : C.textMuted, cursor: "pointer", backdropFilter: "blur(8px)", display: "flex", alignItems: "center", justifyContent: "center" }}><I.Compass /></button>
           </div>
 
           {/* 3D controls */}
@@ -2311,7 +2369,7 @@ export default function GridForgeGIS() {
 
           {/* Basemap picker */}
           <div style={{ position: "absolute", bottom: 38, left: 12, zIndex: 10 }}>
-            <button onClick={() => setShowBaseMapPicker(p => !p)} style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px 6px 8px", borderRadius: showBaseMapPicker ? "8px 8px 0 0" : 8, border: `1px solid ${C.panelBorder}`, borderBottom: showBaseMapPicker ? "none" : `1px solid ${C.panelBorder}`, background: C.panel + "ee", color: C.text, cursor: "pointer", fontSize: 11, fontWeight: 500, backdropFilter: "blur(8px)" }}>
+            <button onClick={() => setShowBaseMapPicker(p => !p)} title="Base Map" style={{ display: "flex", alignItems: "center", gap: 6, padding: "6px 12px 6px 8px", borderRadius: showBaseMapPicker ? "8px 8px 0 0" : 8, border: `1px solid ${C.panelBorder}`, borderBottom: showBaseMapPicker ? "none" : `1px solid ${C.panelBorder}`, background: C.panel + "ee", color: C.text, cursor: "pointer", fontSize: 11, fontWeight: 500, backdropFilter: "blur(8px)" }}>
               <I.Globe /><span style={{ textTransform: "capitalize" }}>{baseMap}</span><span style={{ transform: showBaseMapPicker ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 0.2s", display: "flex" }}><I.ChevUp /></span>
             </button>
             {showBaseMapPicker && <div style={{ background: C.panel + "f5", border: `1px solid ${C.panelBorder}`, borderTop: "none", borderRadius: "0 8px 8px 8px", padding: 10, backdropFilter: "blur(12px)", minWidth: 280 }}>
@@ -2344,10 +2402,10 @@ export default function GridForgeGIS() {
             {gridStats && <span>Grid: <span style={{ color: C.accent }}>{gridStats.nx}×{gridStats.ny}</span></span>}
             {selectedPts.size > 0 && <span>Selected: <span style={{ color: "#ffff00" }}>{selectedPts.size}</span></span>}
             {(boundaries.length > 0 || breaklines.length > 0) && <span>B/BL: <span style={{ color: "#f97316" }}>{boundaries.length}</span>/<span style={{ color: "#00e5ff" }}>{breaklines.length}</span></span>}
-            <span onClick={() => setSnapEnabled(p => !p)} style={{ color: snapEnabled ? C.green : C.textDim, fontWeight: 600, cursor: "pointer" }}>SNAP</span>
-            <span onClick={() => updateGs("showPointNumbers", !gs.showPointNumbers)} style={{ color: gs.showPointNumbers ? C.green : C.textDim, fontWeight: 600, cursor: "pointer" }}>PT#</span>
-            <span onClick={() => updateGs("showPointLevels", !gs.showPointLevels)} style={{ color: gs.showPointLevels ? C.green : C.textDim, fontWeight: 600, cursor: "pointer" }}>LVL</span>
-            <span onClick={() => updateGs("showPointDescs", !gs.showPointDescs)} style={{ color: gs.showPointDescs ? C.green : C.textDim, fontWeight: 600, cursor: "pointer" }}>DESC</span>
+            <span onClick={() => setSnapEnabled(p => !p)} title="Toggle snap to points" style={{ color: snapEnabled ? C.green : C.textDim, fontWeight: 600, cursor: "pointer" }}>SNAP</span>
+            <span onClick={() => updateGs("showPointNumbers", !gs.showPointNumbers)} title="Show point numbers" style={{ color: gs.showPointNumbers ? C.green : C.textDim, fontWeight: 600, cursor: "pointer" }}>PT#</span>
+            <span onClick={() => updateGs("showPointLevels", !gs.showPointLevels)} title="Show point levels" style={{ color: gs.showPointLevels ? C.green : C.textDim, fontWeight: 600, cursor: "pointer" }}>LVL</span>
+            <span onClick={() => updateGs("showPointDescs", !gs.showPointDescs)} title="Show point descriptions" style={{ color: gs.showPointDescs ? C.green : C.textDim, fontWeight: 600, cursor: "pointer" }}>DESC</span>
             {drawMode && <span style={{ color: C.accent }}>Drawing: {drawMode.replace(/_/g, " ")}</span>}
             {measureMode && <span style={{ color: C.accent }}>Tool: {measureMode}</span>}
             <div style={{ flex: 1 }} />
