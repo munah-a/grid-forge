@@ -2332,10 +2332,10 @@ export function measurePolygonArea(pts) {
   return Math.abs(area) / 2;
 }
 
-/** Compass bearing in degrees (0=N, 90=E, 180=S, 270=W) */
+/** Compass bearing in degrees (0=N, 90=E, 180=S, 270=W). Y increases downward (screen/grid coords). */
 export function measureBearing(x1, y1, x2, y2) {
   const dx = x2 - x1, dy = y2 - y1;
-  const angle = Math.atan2(dx, -dy) * 180 / Math.PI; // -dy because canvas Y increases downward
+  const angle = Math.atan2(dx, dy) * 180 / Math.PI; // +dy: north = increasing Y (downward on screen)
   return ((angle % 360) + 360) % 360;
 }
 

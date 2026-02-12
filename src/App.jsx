@@ -18,7 +18,7 @@ import {
   project3D, generateSampleData,
   pointInPolygon, densifyBreakline, densifyProximityBreakline, densifyWallBreakline,
   buildSpatialIndex, applyBoundaryMask,
-  computeConvexHull, computeConcaveHull,
+  computeConvexHull, computeConcaveHull, delaunayTriangulate,
 } from "./engine.js";
 import GriddingWorker from "./gridding.worker.js?worker";
 import { CRS_REGISTRY, fetchCRSDefinition, transformPoints, transformCoord, isGeographicCRS, detectCRSFromPrj, detectCRSFromGeoJSON } from "./crs.js";
@@ -617,6 +617,24 @@ export default function GridForgeGIS() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [drawMode, deleteSelectedPoints, undo, redo, showCRSPrompt, showBugReport, editNodesMode, viewState, boundaries, breaklines, pushHistory]);
+
+  // ── Wheel handler (non-passive to allow preventDefault) ─────────────────────
+  useEffect(() => {
+    const el = canvasRef.current;
+    if (!el) return;
+    const onWheel = (e) => {
+      e.preventDefault();
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+      const factor = e.deltaY > 0 ? 0.9 : 1.1;
+      setViewState(prev => {
+        const ns = Math.max(0.001, Math.min(1000, prev.scale * factor));
+        return { scale: ns, x: mx - (mx - prev.x) * (ns / prev.scale), y: my - (my - prev.y) * (ns / prev.scale) };
+      });
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
 
   // ── Offscreen raster cache (ImageData-based) ───────────────────────────────
   useEffect(() => {
@@ -2230,9 +2248,9 @@ export default function GridForgeGIS() {
         ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI * 2); ctx.fillStyle = "rgba(0,0,0,0.25)"; ctx.fill();
         ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI * 2); ctx.fillStyle = isDark ? "rgba(15,22,41,0.9)" : "rgba(255,255,255,0.9)"; ctx.fill();
         ctx.strokeStyle = isDark ? C.panelBorder : "#bcc2cc"; ctx.lineWidth = 2; ctx.stroke();
-        ctx.beginPath(); ctx.moveTo(cx, cy - r + 10); ctx.lineTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.closePath(); ctx.fillStyle = C.accent; ctx.fill();
-        ctx.beginPath(); ctx.moveTo(cx, cy + r - 10); ctx.lineTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.closePath(); ctx.fillStyle = isDark ? "#334155" : "#94a3b8"; ctx.fill();
-        ctx.font = "bold 14px 'DM Sans',sans-serif"; ctx.fillStyle = C.accent; ctx.textAlign = "center"; ctx.fillText("N", cx, cy - r + 6);
+        ctx.beginPath(); ctx.moveTo(cx, cy + r - 10); ctx.lineTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.closePath(); ctx.fillStyle = C.accent; ctx.fill();
+        ctx.beginPath(); ctx.moveTo(cx, cy - r + 10); ctx.lineTo(cx - 10, cy); ctx.lineTo(cx + 10, cy); ctx.closePath(); ctx.fillStyle = isDark ? "#334155" : "#94a3b8"; ctx.fill();
+        ctx.font = "bold 14px 'DM Sans',sans-serif"; ctx.fillStyle = C.accent; ctx.textAlign = "center"; ctx.fillText("N", cx, cy + r - 2);
       }
     }); // end requestAnimationFrame
     return () => { if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current); };
@@ -2528,16 +2546,6 @@ export default function GridForgeGIS() {
       return;
     }
     dragRef.current.dragging = false;
-  };
-  const handleWheel = (e) => {
-    e.preventDefault();
-    const rect = canvasRef.current.getBoundingClientRect();
-    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    const factor = e.deltaY > 0 ? 0.9 : 1.1;
-    setViewState(prev => {
-      const ns = Math.max(0.001, Math.min(1000, prev.scale * factor));
-      return { scale: ns, x: mx - (mx - prev.x) * (ns / prev.scale), y: my - (my - prev.y) * (ns / prev.scale) };
-    });
   };
   const handleCanvasClick = (e) => {
     // ── TIN editing mode ──
@@ -3750,7 +3758,6 @@ export default function GridForgeGIS() {
             {activePanel === "tin" && <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               <Section title="Build TIN">
                 <Btn size="sm" variant="primary" style={{ width: "100%", justifyContent: "center" }} disabled={points.length < 3} onClick={() => {
-                  const { delaunayTriangulate } = require("./engine.js");
                   const tin = delaunayTriangulate(filteredPoints);
                   const mesh = buildMesh(tin, filteredPoints.length);
                   setTinMesh(mesh);
@@ -4098,7 +4105,7 @@ export default function GridForgeGIS() {
 
         {/* ─── Map Canvas ─────────────────────────────────────────────────── */}
         <div ref={containerRef} style={{ flex: 1, position: "relative", overflow: "hidden" }} onDrop={handleDrop} onDragOver={e => e.preventDefault()}>
-          <canvas ref={canvasRef} role="img" aria-label={`GIS map canvas. ${points.length} points loaded${gridData ? `, ${gridData.nx}×${gridData.ny} grid` : ""}. Mode: ${viewMode}`} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onWheel={handleWheel} onClick={handleCanvasClick} onDoubleClick={handleCanvasDblClick} onContextMenu={handleContextMenu}
+          <canvas ref={canvasRef} role="img" aria-label={`GIS map canvas. ${points.length} points loaded${gridData ? `, ${gridData.nx}×${gridData.ny} grid` : ""}. Mode: ${viewMode}`} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onClick={handleCanvasClick} onDoubleClick={handleCanvasDblClick} onContextMenu={handleContextMenu}
             style={{ width: "100%", height: "100%", cursor: editNodesMode ? "crosshair" : drawMode ? "crosshair" : measureMode ? "crosshair" : dragRef.current.dragging ? "grabbing" : "crosshair" }}>GIS map view</canvas>
 
           {/* Map toolbar */}
