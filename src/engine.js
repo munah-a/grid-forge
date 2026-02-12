@@ -413,14 +413,23 @@ export function parseCSV(text) {
 }
 
 /** Parse GeoJSON text */
+const BANNED_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 export function parseGeoJSON(text) {
   const gj = JSON.parse(text);
   const features = gj.features || (gj.type === "Feature" ? [gj] : []);
-  const pts = features.filter(f => f.geometry?.type === "Point").map(f => ({
-    x: f.geometry.coordinates[0], y: f.geometry.coordinates[1],
-    z: f.geometry.coordinates[2] || f.properties?.z || f.properties?.elevation || f.properties?.Z || 0,
-    ...f.properties,
-  }));
+  const pts = features.filter(f => f.geometry?.type === "Point").map(f => {
+    const props = {};
+    if (f.properties) {
+      for (const k of Object.keys(f.properties)) {
+        if (!BANNED_KEYS.has(k)) props[k] = f.properties[k];
+      }
+    }
+    return {
+      x: f.geometry.coordinates[0], y: f.geometry.coordinates[1],
+      z: f.geometry.coordinates[2] || f.properties?.z || f.properties?.elevation || f.properties?.Z || 0,
+      ...props,
+    };
+  });
   const headers = pts.length > 0 ? Object.keys(pts[0]) : [];
   return { headers, rows: pts };
 }
@@ -805,9 +814,13 @@ export function rbfInterpolation(points, gridX, gridY, opts = {}) {
   return grid;
 }
 
-/** TIN - Delaunay triangulation with linear interpolation
- *  Optimised Bowyer-Watson with cached circumcircles, spatial bin-sort,
- *  typed-array storage, free-list slot reuse, and grid-accelerated interpolation. */
+/** TIN - Delaunay triangulation with linear interpolation.
+ *  Uses delaunayTriangulate() (with optional CDT constraint support) for
+ *  the triangulation step, then performs grid-accelerated barycentric interpolation.
+ *  @param {Array} points - Array of {x, y, z} objects
+ *  @param {number[]} gridX - X coordinates of grid columns
+ *  @param {number[]} gridY - Y coordinates of grid rows
+ *  @param {Object} [opts] - Options: onProgress, constraintEdges */
 export function tinInterpolation(points, gridX, gridY, opts = {}) {
   const nx = gridX.length, ny = gridY.length;
   const grid = new Float64Array(nx * ny);
@@ -815,143 +828,25 @@ export function tinInterpolation(points, gridX, gridY, opts = {}) {
   if (n < 3) { grid.fill(NaN); return grid; }
 
   const onProgress = opts.onProgress || null;
+  const constraintEdges = opts.constraintEdges || null;
 
-  // ── Bounding box ──────────────────────────────────────────────────────
+  // ── Triangulate using shared Bowyer-Watson + CDT ───────────────────────
+  const tin = delaunayTriangulate(points,
+    onProgress ? (p) => onProgress(p * 0.7) : null,
+    constraintEdges
+  );
+
+  if (onProgress) onProgress(0.7);
+  const { v0: fv0, v1: fv1, v2: fv2, count: numFinal, px: ptX, py: ptY, pz: ptZ } = tin;
+  if (numFinal === 0) { grid.fill(NaN); return grid; }
+
+  // ── Bounding box (for spatial grid cell sizing) ────────────────────────
   let xMin = Infinity, xMax = -Infinity, yMin = Infinity, yMax = -Infinity;
   for (let i = 0; i < n; i++) {
-    const p = points[i];
-    if (p.x < xMin) xMin = p.x; if (p.x > xMax) xMax = p.x;
-    if (p.y < yMin) yMin = p.y; if (p.y > yMax) yMax = p.y;
+    if (ptX[i] < xMin) xMin = ptX[i]; if (ptX[i] > xMax) xMax = ptX[i];
+    if (ptY[i] < yMin) yMin = ptY[i]; if (ptY[i] > yMax) yMax = ptY[i];
   }
   const dmax = Math.max(xMax - xMin, yMax - yMin) || 1;
-  const midX = (xMin + xMax) / 2, midY = (yMin + yMax) / 2;
-
-  // ── Flat coordinate arrays (avoids object-property lookups in hot loops) ──
-  const ptX = new Float64Array(n + 3);
-  const ptY = new Float64Array(n + 3);
-  const ptZ = new Float64Array(n);
-  for (let i = 0; i < n; i++) { ptX[i] = points[i].x; ptY[i] = points[i].y; ptZ[i] = points[i].z; }
-  // Super-triangle vertices
-  ptX[n] = midX - 20 * dmax; ptY[n] = midY - dmax;
-  ptX[n + 1] = midX; ptY[n + 1] = midY + 20 * dmax;
-  ptX[n + 2] = midX + 20 * dmax; ptY[n + 2] = midY - dmax;
-
-  // ── Spatial bin-sort for insertion locality ────────────────────────────
-  const sortedIdx = new Int32Array(n);
-  for (let i = 0; i < n; i++) sortedIdx[i] = i;
-  const numBins = Math.max(1, Math.floor(Math.sqrt(n) * 0.5));
-  const binW = (xMax - xMin) / numBins || 1;
-  const binH = (yMax - yMin) / numBins || 1;
-  const binKeys = new Int32Array(n);
-  for (let i = 0; i < n; i++) {
-    const bx = Math.min(numBins - 1, Math.floor((ptX[i] - xMin) / binW));
-    const by = Math.min(numBins - 1, Math.floor((ptY[i] - yMin) / binH));
-    binKeys[i] = by * numBins + (by & 1 ? numBins - 1 - bx : bx);
-  }
-  sortedIdx.sort((a, b) => binKeys[a] - binKeys[b]);
-
-  // ── Triangle storage (flat typed arrays + cached circumcircles) ───────
-  const maxSlots = n * 6 + 10;
-  const triV0 = new Int32Array(maxSlots);
-  const triV1 = new Int32Array(maxSlots);
-  const triV2 = new Int32Array(maxSlots);
-  const triCX = new Float64Array(maxSlots);
-  const triCY = new Float64Array(maxSlots);
-  const triR2 = new Float64Array(maxSlots);
-  const triAlive = new Uint8Array(maxSlots);
-  let triCount = 0;
-  const freeSlots = [];
-
-  function addTri(v0, v1, v2) {
-    const ti = freeSlots.length > 0 ? freeSlots.pop() : triCount++;
-    triV0[ti] = v0; triV1[ti] = v1; triV2[ti] = v2;
-    triAlive[ti] = 1;
-    const ax = ptX[v0], ay = ptY[v0], bx = ptX[v1], by = ptY[v1], cx = ptX[v2], cy = ptY[v2];
-    const D = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
-    if (Math.abs(D) < 1e-12) {
-      triCX[ti] = 0; triCY[ti] = 0; triR2[ti] = 1e30;
-    } else {
-      const a2 = ax * ax + ay * ay, b2 = bx * bx + by * by, c2 = cx * cx + cy * cy;
-      const ux = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / D;
-      const uy = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / D;
-      triCX[ti] = ux; triCY[ti] = uy;
-      triR2[ti] = (ax - ux) * (ax - ux) + (ay - uy) * (ay - uy);
-    }
-  }
-
-  // Seed with super-triangle
-  addTri(n, n + 1, n + 2);
-
-  // ── Bowyer-Watson incremental insertion ───────────────────────────────
-  const badBuf = new Int32Array(maxSlots);
-  const edgeBuf = new Int32Array(maxSlots * 2);
-  const progressStep = Math.max(1, Math.floor(n / 50));
-
-  for (let si = 0; si < n; si++) {
-    const pi = sortedIdx[si];
-    const ppx = ptX[pi], ppy = ptY[pi];
-
-    // Find bad triangles (point inside circumcircle)
-    let badCount = 0;
-    for (let t = 0; t < triCount; t++) {
-      if (!triAlive[t]) continue;
-      const dx = ppx - triCX[t], dy = ppy - triCY[t];
-      if (dx * dx + dy * dy <= triR2[t] + 1e-8) badBuf[badCount++] = t;
-    }
-
-    // Find boundary edges of the polygonal hole
-    let edgeCount = 0;
-    for (let bi = 0; bi < badCount; bi++) {
-      const bt = badBuf[bi];
-      const a0 = triV0[bt], a1 = triV1[bt], a2 = triV2[bt];
-      // Check each of the 3 edges
-      for (let e = 0; e < 3; e++) {
-        const e1 = e === 0 ? a0 : e === 1 ? a1 : a2;
-        const e2 = e === 0 ? a1 : e === 1 ? a2 : a0;
-        let shared = false;
-        for (let bj = 0; bj < badCount; bj++) {
-          if (bj === bi) continue;
-          const bt2 = badBuf[bj];
-          const w0 = triV0[bt2], w1 = triV1[bt2], w2 = triV2[bt2];
-          if ((w0 === e1 && w1 === e2) || (w1 === e1 && w2 === e2) || (w2 === e1 && w0 === e2) ||
-            (w0 === e2 && w1 === e1) || (w1 === e2 && w2 === e1) || (w2 === e2 && w0 === e1)) {
-            shared = true; break;
-          }
-        }
-        if (!shared) { edgeBuf[edgeCount++] = e1; edgeBuf[edgeCount++] = e2; }
-      }
-    }
-
-    // Remove bad triangles (recycle slots)
-    for (let bi = 0; bi < badCount; bi++) {
-      triAlive[badBuf[bi]] = 0;
-      freeSlots.push(badBuf[bi]);
-    }
-
-    // Create new triangles from point to each boundary edge
-    for (let ei = 0; ei < edgeCount; ei += 2) addTri(pi, edgeBuf[ei], edgeBuf[ei + 1]);
-
-    if (onProgress && si % progressStep === 0) onProgress(si / n * 0.7);
-  }
-
-  // ── Collect final triangles (exclude super-triangle vertices) ─────────
-  if (onProgress) onProgress(0.7);
-
-  let numFinal = 0;
-  for (let t = 0; t < triCount; t++) {
-    if (triAlive[t] && triV0[t] < n && triV1[t] < n && triV2[t] < n) numFinal++;
-  }
-  const fv0 = new Int32Array(numFinal);
-  const fv1 = new Int32Array(numFinal);
-  const fv2 = new Int32Array(numFinal);
-  let fi = 0;
-  for (let t = 0; t < triCount; t++) {
-    if (!triAlive[t]) continue;
-    if (triV0[t] >= n || triV1[t] >= n || triV2[t] >= n) continue;
-    fv0[fi] = triV0[t]; fv1[fi] = triV1[t]; fv2[fi] = triV2[t]; fi++;
-  }
-
-  if (numFinal === 0) { grid.fill(NaN); return grid; }
 
   // ── Spatial grid for fast triangle lookup during interpolation ────────
   const cellSize = dmax / Math.min(Math.sqrt(numFinal), 100);
@@ -1582,6 +1477,37 @@ export function pointsToGeoJSON(points) {
   }, null, 2);
 }
 
+/** Export breaklines as CSV (one file per breakline, or combined with # separators) */
+export function breaklinesToCSV(breaklines) {
+  const lines = ["# name,type,x,y,z[,zBottom]"];
+  for (const bl of breaklines) {
+    const bType = bl.breaklineType || "standard";
+    lines.push(`# ${bl.name} (${bType})`);
+    for (const v of bl.vertices) {
+      if (bType === "wall") lines.push(`${v[0]},${v[1]},${v[2] ?? 0},${v[3] ?? 0}`);
+      else if (bType === "proximity") lines.push(`${v[0]},${v[1]}`);
+      else lines.push(`${v[0]},${v[1]},${v[2] ?? 0}`);
+    }
+  }
+  return lines.join('\n');
+}
+
+/** Export breaklines as GeoJSON LineString features */
+export function breaklinesToGeoJSON(breaklines) {
+  return JSON.stringify({
+    type: "FeatureCollection",
+    features: breaklines.filter(bl => bl.vertices && bl.vertices.length >= 2).map(bl => {
+      const bType = bl.breaklineType || "standard";
+      const coords = bl.vertices.map(v => bType === "wall" ? [v[0], v[1], v[2] ?? 0] : bType === "proximity" ? [v[0], v[1]] : [v[0], v[1], v[2] ?? 0]);
+      return {
+        type: "Feature",
+        geometry: { type: "LineString", coordinates: coords },
+        properties: { name: bl.name, breaklineType: bType },
+      };
+    }),
+  }, null, 2);
+}
+
 /** Export contours as GeoJSON */
 export function contoursToGeoJSON(contours) {
   const features = [];
@@ -1640,10 +1566,22 @@ export function serializeProject(state) {
 }
 
 /** Deserialize project JSON back to state */
+const MAX_GRID_CELLS = 25_000_000;
 export function deserializeProject(json) {
   const s = JSON.parse(json);
-  if (s.gridData?.grid) s.gridData.grid = new Float64Array(s.gridData.grid);
-  if (s.hillshadeData) s.hillshadeData = new Float64Array(s.hillshadeData);
+  if (typeof s !== "object" || s === null || Array.isArray(s)) {
+    throw new Error("Invalid project file: expected an object");
+  }
+  if (s.gridData?.grid) {
+    if (!Array.isArray(s.gridData.grid)) throw new Error("Invalid project file: grid must be an array");
+    if (s.gridData.grid.length > MAX_GRID_CELLS) throw new Error(`Grid too large: ${s.gridData.grid.length} cells exceeds ${MAX_GRID_CELLS} limit`);
+    s.gridData.grid = new Float64Array(s.gridData.grid);
+  }
+  if (s.hillshadeData) {
+    if (!Array.isArray(s.hillshadeData)) throw new Error("Invalid project file: hillshadeData must be an array");
+    if (s.hillshadeData.length > MAX_GRID_CELLS) throw new Error(`Hillshade too large: ${s.hillshadeData.length} cells exceeds ${MAX_GRID_CELLS} limit`);
+    s.hillshadeData = new Float64Array(s.hillshadeData);
+  }
   return s;
 }
 
@@ -1719,7 +1657,8 @@ export function pointInPolygon(x, y, polygon) {
   return inside;
 }
 
-/** Densify a breakline into points at given max spacing */
+/** Densify a breakline into points at given max spacing.
+ *  Caps each segment to 500 subdivisions to prevent memory explosion on very long segments. */
 export function densifyBreakline(vertices, maxSpacing) {
   const result = [];
   for (let i = 0; i < vertices.length; i++) {
@@ -1729,7 +1668,7 @@ export function densifyBreakline(vertices, maxSpacing) {
       const dy = vertices[i + 1][1] - vertices[i][1];
       const dz = vertices[i + 1][2] - vertices[i][2];
       const segLen = Math.sqrt(dx * dx + dy * dy);
-      const nSeg = Math.ceil(segLen / maxSpacing);
+      const nSeg = Math.min(500, Math.ceil(segLen / maxSpacing));
       for (let s = 1; s < nSeg; s++) {
         const t = s / nSeg;
         result.push({
@@ -1743,14 +1682,19 @@ export function densifyBreakline(vertices, maxSpacing) {
   return result;
 }
 
-/** Densify a proximity breakline — 2D vertices get Z from nearest data points */
+/** Densify a proximity breakline — 2D vertices get Z from nearest data points.
+ *  Falls back to z=0 when no data points are available. */
 export function densifyProximityBreakline(vertices, maxSpacing, dataPoints) {
-  if (dataPoints.length === 0) return [];
-  const si = buildSpatialIndex(dataPoints);
-  const getZ = (x, y) => {
-    const nbs = si.findKNearest(x, y, 1);
-    return nbs.length > 0 ? dataPoints[nbs[0].idx].z : 0;
-  };
+  let getZ;
+  if (dataPoints.length === 0) {
+    getZ = () => 0;
+  } else {
+    const si = buildSpatialIndex(dataPoints);
+    getZ = (x, y) => {
+      const nbs = si.findKNearest(x, y, 1);
+      return nbs.length > 0 ? dataPoints[nbs[0].idx].z : 0;
+    };
+  }
   const result = [];
   for (let i = 0; i < vertices.length; i++) {
     const [vx, vy] = vertices[i];
@@ -1759,7 +1703,7 @@ export function densifyProximityBreakline(vertices, maxSpacing, dataPoints) {
       const [nx, ny] = vertices[i + 1];
       const dx = nx - vx, dy = ny - vy;
       const segLen = Math.sqrt(dx * dx + dy * dy);
-      const nSeg = Math.ceil(segLen / maxSpacing);
+      const nSeg = Math.min(500, Math.ceil(segLen / maxSpacing));
       for (let s = 1; s < nSeg; s++) {
         const t = s / nSeg;
         const mx = vx + dx * t, my = vy + dy * t;
@@ -1793,7 +1737,7 @@ export function densifyWallBreakline(vertices, maxSpacing) {
       const [nx, ny, nzTop, nzBottom] = vertices[i + 1];
       const dx = nx - vx, dy = ny - vy;
       const segLen = Math.sqrt(dx * dx + dy * dy);
-      const nSeg = Math.ceil(segLen / maxSpacing);
+      const nSeg = Math.min(500, Math.ceil(segLen / maxSpacing));
       const segDx = dx, segDy = dy;
       const segLen2 = Math.sqrt(segDx * segDx + segDy * segDy) || 1;
       const sPerpX = -segDy / segLen2, sPerpY = segDx / segLen2;
@@ -1962,12 +1906,13 @@ export function computeConcaveHull(points, concavity = 0.5) {
 // DELAUNAY TRIANGULATION (standalone, reusable)
 // ═══════════════════════════════════════════════════════════════════════════════
 
-/** Bowyer-Watson Delaunay triangulation.
+/** Bowyer-Watson Delaunay triangulation with optional constraint edge enforcement (CDT).
  *  @param {Array} points - Array of {x, y, z} objects
  *  @param {Function} [onProgress] - Optional callback(0..1)
+ *  @param {Array} [constraintEdges] - Optional array of [indexA, indexB] pairs to enforce as edges
  *  @returns {{ v0: Int32Array, v1: Int32Array, v2: Int32Array, count: number,
  *             px: Float64Array, py: Float64Array, pz: Float64Array }} */
-export function delaunayTriangulate(points, onProgress) {
+export function delaunayTriangulate(points, onProgress, constraintEdges) {
   const n = points.length;
   if (n < 3) return { v0: new Int32Array(0), v1: new Int32Array(0), v2: new Int32Array(0), count: 0, px: new Float64Array(0), py: new Float64Array(0), pz: new Float64Array(0) };
 
@@ -2082,6 +2027,179 @@ export function delaunayTriangulate(points, onProgress) {
     for (let ei = 0; ei < edgeCount; ei += 2) addTri(pi, edgeBuf[ei], edgeBuf[ei + 1]);
 
     if (onProgress && si % progressStep === 0) onProgress(si / n);
+  }
+
+  // ── Enforce constraint edges (Sloan 1993 CDT algorithm) ─────────────
+  if (constraintEdges && constraintEdges.length > 0) {
+    // Build edge → triangle adjacency
+    const ek = (a, b) => a < b ? a * 131071 + b : b * 131071 + a;
+    const edgeAdj = new Map();
+
+    for (let ti = 0; ti < triCount; ti++) {
+      if (!triAlive[ti]) continue;
+      const va = triV0[ti], vb = triV1[ti], vc = triV2[ti];
+      const edges = [ek(va, vb), ek(vb, vc), ek(vc, va)];
+      for (const key of edges) {
+        let arr = edgeAdj.get(key);
+        if (!arr) { arr = []; edgeAdj.set(key, arr); }
+        arr.push(ti);
+      }
+    }
+
+    function removeTriAdj(ti) {
+      const va = triV0[ti], vb = triV1[ti], vc = triV2[ti];
+      for (const key of [ek(va, vb), ek(vb, vc), ek(vc, va)]) {
+        const arr = edgeAdj.get(key);
+        if (arr) {
+          const idx = arr.indexOf(ti);
+          if (idx >= 0) arr.splice(idx, 1);
+          if (arr.length === 0) edgeAdj.delete(key);
+        }
+      }
+    }
+
+    function addTriAdj(ti) {
+      const va = triV0[ti], vb = triV1[ti], vc = triV2[ti];
+      for (const key of [ek(va, vb), ek(vb, vc), ek(vc, va)]) {
+        let arr = edgeAdj.get(key);
+        if (!arr) { arr = []; edgeAdj.set(key, arr); }
+        arr.push(ti);
+      }
+    }
+
+    function oppositeVert(ti, ea, eb) {
+      const a = triV0[ti], b = triV1[ti], c = triV2[ti];
+      if (a !== ea && a !== eb) return a;
+      if (b !== ea && b !== eb) return b;
+      return c;
+    }
+
+    // Proper segment intersection test (excludes endpoints)
+    function segsCross(ax, ay, bx, by, cx, cy, dx, dy) {
+      const d1 = (bx - ax) * (cy - ay) - (by - ay) * (cx - ax);
+      const d2 = (bx - ax) * (dy - ay) - (by - ay) * (dx - ax);
+      const d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
+      const d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
+      return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
+             ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+    }
+
+    function recomputeCircum(ti) {
+      const ax = ptX[triV0[ti]], ay = ptY[triV0[ti]];
+      const bx = ptX[triV1[ti]], by = ptY[triV1[ti]];
+      const cx = ptX[triV2[ti]], cy = ptY[triV2[ti]];
+      const D = 2 * (ax * (by - cy) + bx * (cy - ay) + cx * (ay - by));
+      if (Math.abs(D) < 1e-12) {
+        triCX[ti] = 0; triCY[ti] = 0; triR2[ti] = 1e30;
+      } else {
+        const a2 = ax * ax + ay * ay, b2 = bx * bx + by * by, c2 = cx * cx + cy * cy;
+        triCX[ti] = (a2 * (by - cy) + b2 * (cy - ay) + c2 * (ay - by)) / D;
+        triCY[ti] = (a2 * (cx - bx) + b2 * (ax - cx) + c2 * (bx - ax)) / D;
+        triR2[ti] = (ax - triCX[ti]) * (ax - triCX[ti]) + (ay - triCY[ti]) * (ay - triCY[ti]);
+      }
+    }
+
+    function flipEdge(ti1, ti2, ea, eb) {
+      const p = oppositeVert(ti1, ea, eb);
+      const q = oppositeVert(ti2, ea, eb);
+      removeTriAdj(ti1);
+      removeTriAdj(ti2);
+      triV0[ti1] = p; triV1[ti1] = q; triV2[ti1] = ea;
+      triV0[ti2] = p; triV1[ti2] = q; triV2[ti2] = eb;
+      recomputeCircum(ti1);
+      recomputeCircum(ti2);
+      addTriAdj(ti1);
+      addTriAdj(ti2);
+      return [p, q];
+    }
+
+    const constrainedSet = new Set();
+
+    for (const ce of constraintEdges) {
+      const ca = ce[0], cb = ce[1];
+      if (ca >= n || cb >= n || ca === cb) continue;
+      const ckey = ek(ca, cb);
+      if (edgeAdj.has(ckey) && edgeAdj.get(ckey).length > 0) {
+        constrainedSet.add(ckey);
+        continue;
+      }
+
+      // Collect all edges that cross constraint segment (ca, cb)
+      const crossing = [];
+      for (const [key, tris] of edgeAdj) {
+        if (tris.length !== 2) continue;
+        // Decode edge vertices from key
+        let ea, eb;
+        if (key > 0) {
+          ea = Math.floor(key / 131071);
+          eb = key - ea * 131071;
+        } else continue;
+        if (ea === ca || ea === cb || eb === ca || eb === cb) continue;
+        if (segsCross(ptX[ca], ptY[ca], ptX[cb], ptY[cb], ptX[ea], ptY[ea], ptX[eb], ptY[eb])) {
+          crossing.push([ea, eb]);
+        }
+      }
+
+      // Iteratively flip crossing edges until constraint edge appears (Sloan algorithm)
+      const newEdges = [];
+      let maxIter = crossing.length * crossing.length + crossing.length + 10;
+      while (crossing.length > 0 && maxIter-- > 0) {
+        const edge = crossing.shift();
+        const ea = edge[0], eb = edge[1];
+        const ekey = ek(ea, eb);
+        const eTris = edgeAdj.get(ekey);
+        if (!eTris || eTris.length !== 2) continue;
+
+        const ti1 = eTris[0], ti2 = eTris[1];
+        const p = oppositeVert(ti1, ea, eb);
+        const q = oppositeVert(ti2, ea, eb);
+
+        // Convexity check: quad is convex iff diagonals p-q and ea-eb cross
+        if (!segsCross(ptX[p], ptY[p], ptX[q], ptY[q], ptX[ea], ptY[ea], ptX[eb], ptY[eb])) {
+          crossing.push(edge); // Non-convex, try again later
+          continue;
+        }
+
+        const flipped = flipEdge(ti1, ti2, ea, eb);
+        const fp = flipped[0], fq = flipped[1];
+        const fkey = ek(fp, fq);
+
+        if (fkey === ckey) {
+          constrainedSet.add(ckey);
+        } else if (segsCross(ptX[ca], ptY[ca], ptX[cb], ptY[cb], ptX[fp], ptY[fp], ptX[fq], ptY[fq])) {
+          crossing.push([fp, fq]);
+        } else {
+          newEdges.push([fp, fq]);
+        }
+      }
+
+      constrainedSet.add(ckey);
+
+      // Restore Delaunay property for non-constraint new edges
+      let changed = true;
+      let passes = 0;
+      while (changed && passes++ < 4) {
+        changed = false;
+        for (const ne of newEdges) {
+          const neKey = ek(ne[0], ne[1]);
+          if (constrainedSet.has(neKey)) continue;
+          const neTris = edgeAdj.get(neKey);
+          if (!neTris || neTris.length !== 2) continue;
+          const ti1 = neTris[0], ti2 = neTris[1];
+          const p = oppositeVert(ti1, ne[0], ne[1]);
+          const q = oppositeVert(ti2, ne[0], ne[1]);
+          // In-circumcircle test: if q is inside circumcircle of triangle (p, ne[0], ne[1]) → flip
+          const dx = ptX[q] - triCX[ti1], dy = ptY[q] - triCY[ti1];
+          if (dx * dx + dy * dy < triR2[ti1] - 1e-8) {
+            if (segsCross(ptX[p], ptY[p], ptX[q], ptY[q], ptX[ne[0]], ptY[ne[0]], ptX[ne[1]], ptY[ne[1]])) {
+              const flipped = flipEdge(ti1, ti2, ne[0], ne[1]);
+              ne[0] = flipped[0]; ne[1] = flipped[1];
+              changed = true;
+            }
+          }
+        }
+      }
+    }
   }
 
   // Collect final triangles (exclude super-triangle vertices)

@@ -49,10 +49,13 @@ for (let z = 1; z <= 60; z++) {
 export async function fetchCRSDefinition(epsgCode) {
   // Extract numeric code from "EPSG:XXXX"
   const numeric = epsgCode.replace(/^EPSG:/i, "");
+  if (!/^\d{4,6}$/.test(numeric)) return false; // validate format
   if (proj4.defs(`EPSG:${numeric}`)) return true; // already registered
 
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
   try {
-    const resp = await fetch(`https://epsg.io/${numeric}.proj4`);
+    const resp = await fetch(`https://epsg.io/${numeric}.proj4`, { signal: controller.signal });
     if (!resp.ok) return false;
     const def = await resp.text();
     if (!def || !def.includes("+proj")) return false;
@@ -60,6 +63,8 @@ export async function fetchCRSDefinition(epsgCode) {
     return true;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
