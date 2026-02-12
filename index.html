@@ -1,14 +1,30 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="GridForge GIS - Professional browser-based gridding, contouring & GIS visualization" />
-    <title>GridForge GIS</title>
-    <link rel="icon" type="image/svg+xml" href="/icon.svg" />
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
-  </body>
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description"
+    content="GridForge GIS - Professional browser-based gridding, contouring & GIS visualization" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.arcgisonline.com https://server.arcgisonline.com; connect-src 'self' https://epsg.io https://*.tile.openstreetmap.org https://*.arcgisonline.com https://server.arcgisonline.com; worker-src 'self' blob:;" />
+  <title>GridForge GIS</title>
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+</head>
+
+<body>
+  <a href="#root" class="sr-only"
+    style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;">Skip to main content</a>
+  <div id="root" role="application" aria-label="GridForge GIS Application"></div>
+  <script type="module" src="/src/main.jsx"></script>
+  <script>
+    // Service Worker registration
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('sw.js').catch(() => { });
+      });
+    }
+  </script>
+</body>
+
 </html>

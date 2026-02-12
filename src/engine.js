@@ -258,6 +258,72 @@ class SpatialIndex {
     for (let i = 0; i < hs; i++) outDist[i] = Math.sqrt(outDist[i]);
     return hs;
   }
+
+  /** Sector-constrained K-nearest search (GRD-24).
+   *  Partitions space into sectors (4=quadrant, 8=octant) and returns
+   *  up to `maxPerSector` nearest points from each sector.
+   *  Returns array of {idx, dist}. */
+  findKNearestBySector(x, y, k, sectorCount, maxPerSector) {
+    // First find more candidates than needed
+    const bigK = Math.min(this.n, k * 4);
+    const tmpIdx = new Int32Array(bigK);
+    const tmpDist = new Float64Array(bigK);
+    const found = this.findKNearestRaw(x, y, bigK, tmpIdx, tmpDist);
+
+    // Classify each candidate into its sector
+    const sectorAngle = (2 * Math.PI) / sectorCount;
+    const buckets = Array.from({ length: sectorCount }, () => []);
+    for (let i = 0; i < found; i++) {
+      const px = this._px[tmpIdx[i]] - x, py = this._py[tmpIdx[i]] - y;
+      let angle = Math.atan2(py, px);
+      if (angle < 0) angle += 2 * Math.PI;
+      const sector = Math.min(sectorCount - 1, Math.floor(angle / sectorAngle));
+      buckets[sector].push({ idx: tmpIdx[i], dist: tmpDist[i] });
+    }
+
+    // Take up to maxPerSector from each bucket (already sorted by distance)
+    const result = [];
+    for (let s = 0; s < sectorCount; s++) {
+      const take = Math.min(maxPerSector || 1, buckets[s].length);
+      for (let j = 0; j < take; j++) result.push(buckets[s][j]);
+    }
+    // Sort final result by distance
+    result.sort((a, b) => a.dist - b.dist);
+    return result.slice(0, k);
+  }
+
+  /** Anisotropic K-nearest search (GRD-25).
+   *  Scales distances along the anisotropy direction by the ratio.
+   *  @param {number} ratio - Anisotropy ratio (>1 stretches, <1 compresses)
+   *  @param {number} angle - Anisotropy angle in degrees (0=East, CCW)
+   *  Returns count written to outIdx/outDist (real anisotropic distances). */
+  findKNearestAnisotropic(x, y, k, outIdx, outDist, ratio, angleDeg) {
+    if (!ratio || ratio === 1) return this.findKNearestRaw(x, y, k, outIdx, outDist);
+    const rad = (angleDeg || 0) * Math.PI / 180;
+    const cosA = Math.cos(rad), sinA = Math.sin(rad);
+    const invRatio = 1.0 / ratio;
+    const px = this._px, py = this._py;
+
+    // Brute-force with anisotropic distance (sector search won't help here)
+    let hs = 0, maxD2 = Infinity;
+    for (let i = 0; i < this.n; i++) {
+      const ddx = px[i] - x, ddy = py[i] - y;
+      // Rotate into anisotropy frame, scale, rotate back
+      const u = ddx * cosA + ddy * sinA;
+      const v = -ddx * sinA + ddy * cosA;
+      const d2 = (u * invRatio) * (u * invRatio) + v * v;
+      if (hs >= k && d2 >= maxD2) continue;
+      let pos = hs < k ? hs : k - 1;
+      while (pos > 0 && outDist[pos - 1] > d2) {
+        outDist[pos] = outDist[pos - 1]; outIdx[pos] = outIdx[pos - 1]; pos--;
+      }
+      outDist[pos] = d2; outIdx[pos] = i;
+      if (hs < k) { hs++; if (hs === k) maxD2 = outDist[k - 1]; }
+      else maxD2 = outDist[k - 1];
+    }
+    for (let i = 0; i < hs; i++) outDist[i] = Math.sqrt(outDist[i]);
+    return hs;
+  }
 }
 
 export function buildSpatialIndex(points) {
@@ -432,6 +498,540 @@ export function parseGeoJSON(text) {
   });
   const headers = pts.length > 0 ? Object.keys(pts[0]) : [];
   return { headers, rows: pts };
+}
+
+// ── Shapefile Parser (INP-03) ───────────────────────────────────────────────
+
+/** Parse a Shapefile (.shp) binary ArrayBuffer.
+ *  Supports Point (1), PointZ (11), PointM (21), MultiPoint (8), MultiPointZ (18).
+ *  Returns { headers, rows } like other parsers. */
+export function parseShapefile(arrayBuffer, dbfBuffer) {
+  const view = new DataView(arrayBuffer);
+  // Validate file code (magic number 9994 big-endian)
+  if (view.getInt32(0, false) !== 9994) throw new Error("Invalid Shapefile");
+  const shapeType = view.getInt32(32, true);
+  const supportedTypes = new Set([1, 11, 21, 8, 18]);
+  if (!supportedTypes.has(shapeType)) throw new Error(`Unsupported shape type: ${shapeType}. Only Point types supported.`);
+
+  // Parse DBF if provided (for attributes)
+  let dbfFields = [], dbfRecords = [];
+  if (dbfBuffer) {
+    try {
+      const parsed = parseDBF(dbfBuffer);
+      dbfFields = parsed.fields;
+      dbfRecords = parsed.records;
+    } catch { /* proceed without attributes */ }
+  }
+
+  const points = [];
+  let offset = 100; // Skip 100-byte header
+  let recIdx = 0;
+
+  while (offset < arrayBuffer.byteLength - 8) {
+    // Record header: number (4B BE) + content length in 16-bit words (4B BE)
+    const contentLen = view.getInt32(offset + 4, false) * 2;
+    const recStart = offset + 8;
+    const recType = view.getInt32(recStart, true);
+
+    if (recType === 1 || recType === 11 || recType === 21) {
+      // Point / PointZ / PointM
+      const x = view.getFloat64(recStart + 4, true);
+      const y = view.getFloat64(recStart + 12, true);
+      let z = 0;
+      if (recType === 11 && recStart + 28 <= arrayBuffer.byteLength) {
+        z = view.getFloat64(recStart + 20, true);
+      }
+      const pt = { x, y, z };
+      // Attach DBF attributes
+      if (recIdx < dbfRecords.length) {
+        const rec = dbfRecords[recIdx];
+        for (const f of dbfFields) {
+          if (!BANNED_KEYS.has(f.name)) pt[f.name] = rec[f.name];
+        }
+      }
+      points.push(pt);
+    } else if (recType === 8 || recType === 18) {
+      // MultiPoint / MultiPointZ
+      const numPts = view.getInt32(recStart + 36, true);
+      const hasZ = recType === 18;
+      for (let i = 0; i < numPts; i++) {
+        const pOff = recStart + 40 + i * 16;
+        if (pOff + 16 > arrayBuffer.byteLength) break;
+        const x = view.getFloat64(pOff, true);
+        const y = view.getFloat64(pOff + 8, true);
+        let z = 0;
+        if (hasZ) {
+          const zOff = recStart + 40 + numPts * 16 + 16 + i * 8; // skip bbox + Zmin/Zmax
+          if (zOff + 8 <= arrayBuffer.byteLength) z = view.getFloat64(zOff, true);
+        }
+        points.push({ x, y, z });
+      }
+    }
+    // Null shape (0) → skip
+    offset += 8 + contentLen;
+    recIdx++;
+  }
+
+  const headers = points.length > 0 ? Object.keys(points[0]) : ["x", "y", "z"];
+  return { headers, rows: points };
+}
+
+/** Parse a .dbf (dBASE) file into fields and records */
+function parseDBF(buffer) {
+  const view = new DataView(buffer);
+  const numRecords = view.getInt32(4, true);
+  const headerSize = view.getInt16(8, true);
+  const recordSize = view.getInt16(10, true);
+  const numFields = Math.floor((headerSize - 32 - 1) / 32);
+
+  const fields = [];
+  const decoder = new TextDecoder("ascii");
+  for (let i = 0; i < numFields; i++) {
+    const fOff = 32 + i * 32;
+    const nameBytes = new Uint8Array(buffer, fOff, 11);
+    const name = decoder.decode(nameBytes).replace(/\0.*$/, "").trim();
+    const type = String.fromCharCode(view.getUint8(fOff + 11));
+    const length = view.getUint8(fOff + 16);
+    fields.push({ name, type, length });
+  }
+
+  const records = [];
+  for (let r = 0; r < numRecords; r++) {
+    const rOff = headerSize + r * recordSize;
+    if (rOff >= buffer.byteLength) break;
+    const deleted = view.getUint8(rOff);
+    if (deleted === 0x2A) continue; // skip deleted records
+    const rec = {};
+    let fOff = 1; // skip deletion flag byte
+    for (const f of fields) {
+      const bytes = new Uint8Array(buffer, rOff + fOff, f.length);
+      let val = decoder.decode(bytes).trim();
+      if (f.type === "N" || f.type === "F") {
+        const num = parseFloat(val);
+        val = isNaN(num) ? val : num;
+      }
+      rec[f.name] = val;
+      fOff += f.length;
+    }
+    records.push(rec);
+  }
+  return { fields, records };
+}
+
+// ── GPX Parser (INP-05) ─────────────────────────────────────────────────────
+
+/** Parse a GPX (GPS Exchange Format) XML string.
+ *  Extracts waypoints (<wpt>), track points (<trkpt>), and route points (<rtept>).
+ *  Returns { headers, rows } with x=lon, y=lat, z=ele. */
+export function parseGPX(text) {
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(text, "application/xml");
+  const points = [];
+
+  // Collect all point-like elements
+  const tags = ["wpt", "trkpt", "rtept"];
+  for (const tag of tags) {
+    const els = doc.getElementsByTagName(tag);
+    for (let i = 0; i < els.length; i++) {
+      const el = els[i];
+      const lat = parseFloat(el.getAttribute("lat"));
+      const lon = parseFloat(el.getAttribute("lon"));
+      if (isNaN(lat) || isNaN(lon)) continue;
+      const eleEl = el.getElementsByTagName("ele")[0];
+      const nameEl = el.getElementsByTagName("name")[0];
+      const descEl = el.getElementsByTagName("desc")[0];
+      const timeEl = el.getElementsByTagName("time")[0];
+      points.push({
+        x: lon, y: lat,
+        z: eleEl ? parseFloat(eleEl.textContent) || 0 : 0,
+        pointNo: nameEl ? nameEl.textContent.trim() : "",
+        desc: descEl ? descEl.textContent.trim() : tag,
+        time: timeEl ? timeEl.textContent.trim() : "",
+      });
+    }
+  }
+
+  const headers = ["x", "y", "z", "pointNo", "desc", "time"];
+  return { headers, rows: points };
+}
+
+// ── LAS Parser (INP-06) ─────────────────────────────────────────────────────
+
+/** Parse a LAS (LiDAR) binary file.
+ *  Supports LAS 1.0–1.4, point record formats 0–3.
+ *  Returns { headers, rows } with x, y, z, intensity, classification. */
+export function parseLAS(arrayBuffer) {
+  const view = new DataView(arrayBuffer);
+  // Validate signature "LASF"
+  const sig = String.fromCharCode(view.getUint8(0), view.getUint8(1), view.getUint8(2), view.getUint8(3));
+  if (sig !== "LASF") throw new Error("Invalid LAS file");
+
+  const versionMajor = view.getUint8(24);
+  const versionMinor = view.getUint8(25);
+  const pointDataOffset = view.getUint32(96, true);
+  const pointRecordFormat = view.getUint8(104) & 0x3F; // mask out compression bits
+  const pointRecordLength = view.getUint16(105, true);
+
+  // Number of point records — LAS 1.4 uses 64-bit count at offset 247
+  let numPoints;
+  if (versionMajor >= 1 && versionMinor >= 4) {
+    numPoints = Number(view.getBigUint64(247, true));
+  } else {
+    numPoints = view.getUint32(107, true);
+  }
+
+  // Scale and offset
+  const scaleX = view.getFloat64(131, true);
+  const scaleY = view.getFloat64(139, true);
+  const scaleZ = view.getFloat64(147, true);
+  const offsetX = view.getFloat64(155, true);
+  const offsetY = view.getFloat64(163, true);
+  const offsetZ = view.getFloat64(171, true);
+
+  // Cap at 2M points for browser safety
+  const maxPts = Math.min(numPoints, 2_000_000);
+  const points = [];
+
+  for (let i = 0; i < maxPts; i++) {
+    const pOff = pointDataOffset + i * pointRecordLength;
+    if (pOff + 20 > arrayBuffer.byteLength) break;
+
+    const rawX = view.getInt32(pOff, true);
+    const rawY = view.getInt32(pOff + 4, true);
+    const rawZ = view.getInt32(pOff + 8, true);
+
+    const x = rawX * scaleX + offsetX;
+    const y = rawY * scaleY + offsetY;
+    const z = rawZ * scaleZ + offsetZ;
+
+    const intensity = view.getUint16(pOff + 12, true);
+    // Classification at byte 15 for format 0-5
+    const classification = pointRecordFormat <= 5 ? view.getUint8(pOff + 15) : 0;
+
+    points.push({ x, y, z, intensity, classification });
+  }
+
+  const headers = ["x", "y", "z", "intensity", "classification"];
+  return { headers, rows: points };
+}
+
+// ── Excel Parser (INP-02) ───────────────────────────────────────────────────
+
+/** Parse an XLSX file from ArrayBuffer.
+ *  Minimal implementation: unzips, reads xl/sharedStrings.xml and xl/worksheets/sheet1.xml.
+ *  Returns { headers, rows }. */
+export async function parseExcel(arrayBuffer) {
+  // Use browser built-in DecompressionStream for zip
+  const files = await unzipArrayBuffer(arrayBuffer);
+
+  // Parse shared strings
+  const sharedStrings = [];
+  const ssXml = files["xl/sharedStrings.xml"];
+  if (ssXml) {
+    const doc = new DOMParser().parseFromString(ssXml, "application/xml");
+    const sis = doc.getElementsByTagName("si");
+    for (let i = 0; i < sis.length; i++) {
+      const tEls = sis[i].getElementsByTagName("t");
+      let text = "";
+      for (let j = 0; j < tEls.length; j++) text += tEls[j].textContent;
+      sharedStrings.push(text);
+    }
+  }
+
+  // Parse sheet1
+  const sheetXml = files["xl/worksheets/sheet1.xml"];
+  if (!sheetXml) throw new Error("No sheet1 found in XLSX");
+  const doc = new DOMParser().parseFromString(sheetXml, "application/xml");
+  const rowEls = doc.getElementsByTagName("row");
+
+  const allRows = [];
+  for (let r = 0; r < rowEls.length; r++) {
+    const cells = rowEls[r].getElementsByTagName("c");
+    const row = [];
+    for (let c = 0; c < cells.length; c++) {
+      const cell = cells[c];
+      const type = cell.getAttribute("t");
+      const vEl = cell.getElementsByTagName("v")[0];
+      let value = vEl ? vEl.textContent : "";
+      if (type === "s") {
+        value = sharedStrings[parseInt(value)] || value;
+      } else if (type === "n" || (!type && value !== "")) {
+        value = parseFloat(value);
+        if (isNaN(value)) value = vEl ? vEl.textContent : "";
+      }
+      row.push(value);
+    }
+    allRows.push(row);
+  }
+
+  if (allRows.length === 0) return { headers: [], rows: [] };
+
+  // First row as headers
+  const headers = allRows[0].map((h, i) => String(h || `Col${i + 1}`));
+  const rows = [];
+  for (let i = 1; i < allRows.length; i++) {
+    const row = {};
+    headers.forEach((h, j) => {
+      const v = allRows[i][j];
+      row[h] = v !== undefined && v !== "" && !isNaN(+v) ? +v : (v || "");
+    });
+    rows.push(row);
+  }
+  return { headers, rows };
+}
+
+/** Minimal ZIP reader using DataView */
+async function unzipArrayBuffer(buffer) {
+  const view = new DataView(buffer);
+  const files = {};
+  let offset = 0;
+  const decoder = new TextDecoder("utf-8");
+
+  while (offset < buffer.byteLength - 4) {
+    const sig = view.getUint32(offset, true);
+    if (sig !== 0x04034b50) break; // Local file header signature
+
+    const compressionMethod = view.getUint16(offset + 8, true);
+    const compressedSize = view.getUint32(offset + 18, true);
+    const uncompressedSize = view.getUint32(offset + 22, true);
+    const nameLen = view.getUint16(offset + 26, true);
+    const extraLen = view.getUint16(offset + 28, true);
+    const fileName = decoder.decode(new Uint8Array(buffer, offset + 30, nameLen));
+    const dataStart = offset + 30 + nameLen + extraLen;
+    const compressedData = new Uint8Array(buffer, dataStart, compressedSize);
+
+    if (compressedSize > 0 && !fileName.endsWith("/")) {
+      try {
+        let text;
+        if (compressionMethod === 8) {
+          // Deflate — use DecompressionStream
+          const ds = new DecompressionStream("raw");
+          const writer = ds.writable.getWriter();
+          writer.write(compressedData);
+          writer.close();
+          const reader = ds.readable.getReader();
+          const chunks = [];
+          let done = false;
+          while (!done) {
+            const r = await reader.read();
+            if (r.done) done = true;
+            else chunks.push(r.value);
+          }
+          const totalLen = chunks.reduce((s, c) => s + c.byteLength, 0);
+          const output = new Uint8Array(totalLen);
+          let pos = 0;
+          for (const chunk of chunks) { output.set(chunk, pos); pos += chunk.byteLength; }
+          text = decoder.decode(output);
+        } else {
+          // Stored (no compression)
+          text = decoder.decode(compressedData);
+        }
+        files[fileName] = text;
+      } catch { /* skip undecompressable files */ }
+    }
+    offset = dataStart + compressedSize;
+  }
+  return files;
+}
+
+// ── ESRI ASCII Grid Parser (RST-06) ─────────────────────────────────────────
+
+/** Parse an ESRI ASCII Grid (.asc) file.
+ *  Returns { grid, gridX, gridY, nx, ny, zMin, zMax }. */
+export function parseASCIIGrid(text) {
+  const lines = text.trim().split("\n");
+  const meta = {};
+  let dataStart = 0;
+
+  for (let i = 0; i < Math.min(lines.length, 10); i++) {
+    const parts = lines[i].trim().split(/\s+/);
+    if (parts.length === 2 && isNaN(+parts[0])) {
+      meta[parts[0].toLowerCase()] = parts[1];
+      dataStart = i + 1;
+    } else break;
+  }
+
+  const nx = parseInt(meta.ncols);
+  const ny = parseInt(meta.nrows);
+  const xll = parseFloat(meta.xllcorner || meta.xllcenter || 0);
+  const yll = parseFloat(meta.yllcorner || meta.yllcenter || 0);
+  const cellSize = parseFloat(meta.cellsize || 1);
+  const nodata = parseFloat(meta.nodata_value || meta["nodata_value"] || -9999);
+
+  if (!nx || !ny) throw new Error("Invalid ASCII grid: missing ncols/nrows");
+
+  const grid = new Float64Array(nx * ny);
+  let zMin = Infinity, zMax = -Infinity;
+
+  for (let j = 0; j < ny; j++) {
+    const lineIdx = dataStart + j;
+    if (lineIdx >= lines.length) break;
+    const vals = lines[lineIdx].trim().split(/\s+/);
+    for (let i = 0; i < nx; i++) {
+      const v = parseFloat(vals[i]);
+      const gridJ = ny - 1 - j; // ASCII grid is top-to-bottom, we store bottom-to-top
+      if (isNaN(v) || v === nodata) {
+        grid[gridJ * nx + i] = NaN;
+      } else {
+        grid[gridJ * nx + i] = v;
+        if (v < zMin) zMin = v;
+        if (v > zMax) zMax = v;
+      }
+    }
+  }
+
+  const gridX = Array.from({ length: nx }, (_, i) => xll + i * cellSize);
+  const gridY = Array.from({ length: ny }, (_, j) => yll + j * cellSize);
+
+  return { grid, gridX, gridY, nx, ny, zMin, zMax };
+}
+
+// ── Surfer Grid Parser (RST-06) ─────────────────────────────────────────────
+
+/** Parse a Surfer ASCII Grid (.grd) file.
+ *  Supports DSAA format (Golden Software Surfer 6 format).
+ *  Returns { grid, gridX, gridY, nx, ny, zMin, zMax }. */
+export function parseSurferGrid(text) {
+  const lines = text.trim().split("\n").map(l => l.trim());
+  if (lines[0] !== "DSAA") throw new Error("Unsupported Surfer grid format (expected DSAA)");
+
+  const dims = lines[1].split(/\s+/).map(Number);
+  const nx = dims[0], ny = dims[1];
+  const xRange = lines[2].split(/\s+/).map(Number);
+  const yRange = lines[3].split(/\s+/).map(Number);
+  const zRange = lines[4].split(/\s+/).map(Number);
+
+  const gridX = Array.from({ length: nx }, (_, i) => xRange[0] + i * (xRange[1] - xRange[0]) / (nx - 1));
+  const gridY = Array.from({ length: ny }, (_, j) => yRange[0] + j * (yRange[1] - yRange[0]) / (ny - 1));
+
+  const grid = new Float64Array(nx * ny);
+  let zMin = Infinity, zMax = -Infinity;
+  const allVals = [];
+  for (let i = 5; i < lines.length; i++) {
+    const vals = lines[i].split(/\s+/).map(Number);
+    allVals.push(...vals);
+  }
+
+  const SURFER_NODATA = 1.70141e+038;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) {
+      const idx = j * nx + i;
+      const v = allVals[idx];
+      if (v === undefined || isNaN(v) || v >= SURFER_NODATA) {
+        grid[idx] = NaN;
+      } else {
+        grid[idx] = v;
+        if (v < zMin) zMin = v;
+        if (v > zMax) zMax = v;
+      }
+    }
+  }
+
+  return { grid, gridX, gridY, nx, ny, zMin: zRange[0], zMax: zRange[1] };
+}
+
+// ── Contour DXF Export (CNT-08) ─────────────────────────────────────────────
+
+/** Export contours as DXF R12 format.
+ *  Each contour level gets its own layer named "CONTOUR_{level}".  */
+export function contoursToDXF(contours) {
+  const dxf = [];
+  // HEADER section
+  dxf.push("0", "SECTION", "2", "HEADER", "0", "ENDSEC");
+  // TABLES section (layer table)
+  dxf.push("0", "SECTION", "2", "TABLES");
+  dxf.push("0", "TABLE", "2", "LAYER");
+  for (const c of contours) {
+    const layerName = `CONTOUR_${c.level}`;
+    dxf.push("0", "LAYER", "2", layerName, "70", "0", "62", "7", "6", "CONTINUOUS");
+  }
+  dxf.push("0", "ENDTAB", "0", "ENDSEC");
+  // ENTITIES section
+  dxf.push("0", "SECTION", "2", "ENTITIES");
+  for (const c of contours) {
+    const layerName = `CONTOUR_${c.level}`;
+    const chains = (c.polylines && c.polylines.length > 0)
+      ? c.polylines
+      : chainSegments(c.segments || []);
+    for (const chain of chains) {
+      const pts = chain.points || chain;
+      if (pts.length < 2) continue;
+      // LWPOLYLINE entity
+      dxf.push("0", "LWPOLYLINE", "8", layerName, "38", String(c.level), "90", String(pts.length), "70", chain.closed ? "1" : "0");
+      for (const p of pts) {
+        dxf.push("10", String(p[0]), "20", String(p[1]));
+      }
+    }
+  }
+  dxf.push("0", "ENDSEC", "0", "EOF");
+  return dxf.join("\n");
+}
+
+// ── Contour Clipping (CNT-07) ───────────────────────────────────────────────
+
+/** Clip contour polylines to a polygon boundary using Sutherland-Hodgman.
+ *  @param {Array} contours - Array of { level, polylines, segments }
+ *  @param {Array} polygon - Array of [x,y] vertices forming the clip boundary
+ *  @returns {Array} Clipped contours */
+export function clipContoursToBoundary(contours, polygon) {
+  if (!polygon || polygon.length < 3) return contours;
+  return contours.map(c => {
+    const chains = (c.polylines && c.polylines.length > 0)
+      ? c.polylines
+      : chainSegments(c.segments || []);
+    const clippedChains = [];
+    for (const chain of chains) {
+      const pts = chain.points || chain;
+      const clipped = sutherlandHodgmanClip(pts.map(p => [p[0], p[1]]), polygon);
+      if (clipped.length >= 2) {
+        clippedChains.push({ points: clipped, closed: chain.closed });
+      }
+    }
+    return { ...c, polylines: clippedChains };
+  }).filter(c => c.polylines.length > 0);
+}
+
+/** Sutherland-Hodgman polygon clipping for a polyline against a convex polygon */
+function sutherlandHodgmanClip(subject, clip) {
+  let output = [...subject];
+  for (let i = 0; i < clip.length; i++) {
+    if (output.length === 0) return [];
+    const input = output;
+    output = [];
+    const edgeStart = clip[i];
+    const edgeEnd = clip[(i + 1) % clip.length];
+
+    for (let j = 0; j < input.length; j++) {
+      const current = input[j];
+      const previous = input[(j + input.length - 1) % input.length];
+      const currInside = isInside(current, edgeStart, edgeEnd);
+      const prevInside = isInside(previous, edgeStart, edgeEnd);
+
+      if (currInside) {
+        if (!prevInside) {
+          output.push(lineIntersect(previous, current, edgeStart, edgeEnd));
+        }
+        output.push(current);
+      } else if (prevInside) {
+        output.push(lineIntersect(previous, current, edgeStart, edgeEnd));
+      }
+    }
+  }
+  return output;
+}
+
+function isInside(point, edgeStart, edgeEnd) {
+  return (edgeEnd[0] - edgeStart[0]) * (point[1] - edgeStart[1]) -
+    (edgeEnd[1] - edgeStart[1]) * (point[0] - edgeStart[0]) >= 0;
+}
+
+function lineIntersect(p1, p2, p3, p4) {
+  const x1 = p1[0], y1 = p1[1], x2 = p2[0], y2 = p2[1];
+  const x3 = p3[0], y3 = p3[1], x4 = p4[0], y4 = p4[1];
+  const denom = (x1 - x2) * (y3 - y4) - (y1 - y2) * (x3 - x4);
+  if (Math.abs(denom) < 1e-12) return p1;
+  const t = ((x1 - x3) * (y3 - y4) - (y1 - y3) * (x3 - x4)) / denom;
+  return [x1 + t * (x2 - x1), y1 + t * (y2 - y1)];
 }
 
 /** Auto-detect X/Y/Z/PointNo/Desc columns */
@@ -1732,6 +2332,28 @@ export function measurePolygonArea(pts) {
   return Math.abs(area) / 2;
 }
 
+/** Compass bearing in degrees (0=N, 90=E, 180=S, 270=W) */
+export function measureBearing(x1, y1, x2, y2) {
+  const dx = x2 - x1, dy = y2 - y1;
+  const angle = Math.atan2(dx, -dy) * 180 / Math.PI; // -dy because canvas Y increases downward
+  return ((angle % 360) + 360) % 360;
+}
+
+/** Bilinear interpolation Z lookup at world (x,y). Returns NaN if outside grid or on NaN cell. */
+export function sampleGridZ(grid, gridX, gridY, nx, ny, x, y) {
+  const cellW = (gridX[1] - gridX[0]), cellH = (gridY[1] - gridY[0]);
+  if (cellW === 0 || cellH === 0) return NaN;
+  const fx = (x - gridX[0]) / cellW, fy = (y - gridY[0]) / cellH;
+  if (fx < 0 || fx > nx - 1 || fy < 0 || fy > ny - 1) return NaN;
+  const x0 = Math.floor(fx), y0 = Math.floor(fy);
+  const x1 = Math.min(x0 + 1, nx - 1), y1 = Math.min(y0 + 1, ny - 1);
+  const dx = fx - x0, dy = fy - y0;
+  const v00 = grid[y0 * nx + x0], v10 = grid[y0 * nx + x1];
+  const v01 = grid[y1 * nx + x0], v11 = grid[y1 * nx + x1];
+  if (isNaN(v00) || isNaN(v10) || isNaN(v01) || isNaN(v11)) return NaN;
+  return v00 * (1 - dx) * (1 - dy) + v10 * dx * (1 - dy) + v01 * (1 - dx) * dy + v11 * dx * dy;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // 3D PROJECTION
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -2202,7 +2824,7 @@ export function delaunayTriangulate(points, onProgress, constraintEdges) {
       const d3 = (dx - cx) * (ay - cy) - (dy - cy) * (ax - cx);
       const d4 = (dx - cx) * (by - cy) - (dy - cy) * (bx - cx);
       return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) &&
-             ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
+        ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
     }
 
     function recomputeCircum(ti) {

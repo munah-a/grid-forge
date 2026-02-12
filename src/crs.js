@@ -122,3 +122,96 @@ export function isGeographicCRS(crsCode) {
   }
   return false;
 }
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CRS AUTO-DETECTION (CRS-05)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Detect CRS from a .prj (WKT) file content.
+ * Attempts to identify EPSG code from the WKT name, AUTHORITY,
+ * or falls back to registering as a custom CRS.
+ * Returns the EPSG code string (e.g. "EPSG:4326") or null.
+ */
+export function detectCRSFromPrj(prjText) {
+  if (!prjText || typeof prjText !== "string") return null;
+  const text = prjText.trim();
+
+  // Try to extract AUTHORITY["EPSG","XXXX"]
+  const authMatch = text.match(/AUTHORITY\s*\[\s*"EPSG"\s*,\s*"(\d+)"\s*\]/i);
+  if (authMatch) {
+    const code = `EPSG:${authMatch[1]}`;
+    // Try to register if not already known
+    if (!proj4.defs(code)) {
+      try { proj4.defs(code, text); } catch { /* ignore */ }
+    }
+    return code;
+  }
+
+  // Try common name patterns
+  const nameMatch = text.match(/GEOGCS\s*\[\s*"([^"]+)"/i) || text.match(/PROJCS\s*\[\s*"([^"]+)"/i);
+  if (nameMatch) {
+    const name = nameMatch[1].toUpperCase();
+    if (name.includes("WGS") && name.includes("84")) {
+      if (name.includes("UTM")) {
+        const utmMatch = name.match(/ZONE\s*(\d+)\s*(N|S)?/i);
+        if (utmMatch) {
+          const zone = parseInt(utmMatch[1]);
+          const south = (utmMatch[2] || "N").toUpperCase() === "S";
+          return `EPSG:${south ? 32700 + zone : 32600 + zone}`;
+        }
+      }
+      if (name.includes("PSEUDO") || name.includes("MERCATOR") || name.includes("3857")) return "EPSG:3857";
+      return "EPSG:4326";
+    }
+  }
+
+  // Fall back: register as custom CRS if it looks like a proj4 or WKT definition
+  if (text.startsWith("+proj") || text.startsWith("GEOGCS") || text.startsWith("PROJCS")) {
+    const customCode = "CUSTOM:PRJ";
+    try {
+      proj4.defs(customCode, text);
+      return customCode;
+    } catch { /* ignore */ }
+  }
+
+  return null;
+}
+
+/**
+ * Detect CRS from a GeoJSON object's "crs" property.
+ * Returns EPSG code string or null.
+ */
+export function detectCRSFromGeoJSON(geojson) {
+  if (!geojson) return null;
+  const obj = typeof geojson === "string" ? JSON.parse(geojson) : geojson;
+  if (obj.crs) {
+    // GeoJSON CRS member (deprecated but common)
+    if (obj.crs.type === "name" && obj.crs.properties?.name) {
+      const name = obj.crs.properties.name;
+      // Common formats: "urn:ogc:def:crs:EPSG::4326" or "EPSG:4326"
+      const epsgMatch = name.match(/EPSG[^0-9]*(\d+)$/i);
+      if (epsgMatch) return `EPSG:${epsgMatch[1]}`;
+    }
+    if (obj.crs.type === "EPSG" && obj.crs.properties?.code) {
+      return `EPSG:${obj.crs.properties.code}`;
+    }
+  }
+  // Default: GeoJSON spec mandates WGS84 if no CRS specified
+  return "EPSG:4326";
+}
+
+/**
+ * Register a custom CRS from a Proj4 string.
+ * @param {string} code - EPSG code or custom identifier
+ * @param {string} proj4String - Proj4 definition string
+ * @returns {boolean} true if successfully registered
+ */
+export function registerProj4String(code, proj4String) {
+  try {
+    proj4.defs(code, proj4String);
+    return true;
+  } catch {
+    return false;
+  }
+}
