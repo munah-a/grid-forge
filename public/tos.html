@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Terms of Service — GridForge GIS</title>
+  <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #0a0f1e;
+      --panel: #0f1629;
+      --panel-border: #1a2340;
+      --surface: #141c33;
+      --text: #e2e8f0;
+      --text-muted: #8494a7;
+      --text-dim: #5a6d81;
+      --accent: #f97316;
+      --accent-dim: #c2410c;
+      --blue: #3b82f6;
+      --green: #22c55e;
+      --danger: #ef4444;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'DM Sans', 'Segoe UI', sans-serif;
+      line-height: 1.7;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* ── Animated background grid ─────────────────────────────────── */
+    .bg-grid {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      background-image:
+        linear-gradient(rgba(249,115,22,0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(249,115,22,0.03) 1px, transparent 1px);
+      background-size: 60px 60px;
+      animation: gridDrift 20s linear infinite;
+    }
+    @keyframes gridDrift {
+      0% { background-position: 0 0; }
+      100% { background-position: 60px 60px; }
+    }
+
+    /* ── Floating contour lines ───────────────────────────────────── */
+    .contour-bg {
+      position: fixed;
+      inset: 0;
+      z-index: 0;
+      pointer-events: none;
+      overflow: hidden;
+    }
+    .contour-line {
+      position: absolute;
+      border: 1px solid rgba(249,115,22,0.06);
+      border-radius: 50%;
+      animation: contourFloat 25s ease-in-out infinite;
+    }
+    .contour-line:nth-child(1) { width: 400px; height: 300px; top: 10%; left: -5%; animation-delay: 0s; }
+    .contour-line:nth-child(2) { width: 500px; height: 350px; top: 8%; left: -7%; animation-delay: -2s; }
+    .contour-line:nth-child(3) { width: 600px; height: 400px; top: 6%; left: -9%; animation-delay: -4s; }
+    .contour-line:nth-child(4) { width: 300px; height: 250px; bottom: 15%; right: -3%; animation-delay: -6s; }
+    .contour-line:nth-child(5) { width: 450px; height: 320px; bottom: 12%; right: -6%; animation-delay: -8s; }
+    .contour-line:nth-child(6) { width: 550px; height: 380px; bottom: 9%; right: -9%; animation-delay: -10s; }
+    @keyframes contourFloat {
+      0%, 100% { transform: translate(0, 0) rotate(0deg); }
+      25% { transform: translate(15px, -10px) rotate(2deg); }
+      50% { transform: translate(-10px, 15px) rotate(-1deg); }
+      75% { transform: translate(10px, 10px) rotate(1deg); }
+    }
+
+    /* ── Spinning compass ─────────────────────────────────────────── */
+    .compass {
+      position: fixed;
+      top: 30px;
+      right: 30px;
+      width: 50px;
+      height: 50px;
+      z-index: 10;
+      opacity: 0.15;
+      animation: compassSpin 60s linear infinite;
+      transition: opacity 0.3s;
+      cursor: help;
+    }
+    .compass:hover {
+      opacity: 0.6;
+      animation-duration: 2s;
+    }
+    @keyframes compassSpin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* ── Floating survey stake ────────────────────────────────────── */
+    .survey-stake {
+      position: fixed;
+      bottom: 30px;
+      left: 30px;
+      font-size: 28px;
+      z-index: 10;
+      opacity: 0.12;
+      animation: stakeBob 3s ease-in-out infinite;
+      cursor: help;
+      transition: opacity 0.3s;
+      user-select: none;
+    }
+    .survey-stake:hover { opacity: 0.7; }
+    .survey-stake::after {
+      content: 'STA 0+00.00';
+      position: absolute;
+      bottom: -20px;
+      left: 50%;
+      transform: translateX(-50%);
+      font-size: 8px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent);
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .survey-stake:hover::after { opacity: 1; }
+    @keyframes stakeBob {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-8px); }
+    }
+
+    /* ── Main container ───────────────────────────────────────────── */
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 820px;
+      margin: 0 auto;
+      padding: 60px 32px 100px;
+    }
+
+    /* ── Header ───────────────────────────────────────────────────── */
+    .header {
+      text-align: center;
+      margin-bottom: 48px;
+    }
+    .logo-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+    .logo-row img { border-radius: 10px; }
+    .logo-text {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+    }
+    .logo-text .forge { color: var(--accent); }
+    .logo-text .gis { color: var(--text-muted); font-weight: 400; font-size: 14px; margin-left: 6px; }
+    .page-title {
+      font-size: 32px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, var(--text), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .page-subtitle {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+    .effective-date {
+      display: inline-block;
+      margin-top: 12px;
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      color: var(--accent);
+      background: rgba(249,115,22,0.1);
+      padding: 4px 12px;
+      border-radius: 4px;
+    }
+
+    /* ── Back link ────────────────────────────────────────────────── */
+    .back-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--accent);
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      margin-bottom: 32px;
+      padding: 6px 14px;
+      border-radius: 6px;
+      border: 1px solid transparent;
+      transition: all 0.2s;
+    }
+    .back-link:hover {
+      background: rgba(249,115,22,0.08);
+      border-color: rgba(249,115,22,0.2);
+    }
+
+    /* ── Sections ─────────────────────────────────────────────────── */
+    .section {
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 12px;
+      padding: 28px 28px;
+      margin-bottom: 20px;
+      transition: border-color 0.3s;
+    }
+    .section:hover {
+      border-color: rgba(249,115,22,0.15);
+    }
+    .section-number {
+      display: inline-block;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--accent);
+      background: rgba(249,115,22,0.1);
+      padding: 2px 8px;
+      border-radius: 4px;
+      margin-bottom: 8px;
+    }
+    .section h2 {
+      font-size: 18px;
+      font-weight: 700;
+      margin-bottom: 14px;
+      color: var(--text);
+    }
+    .section p, .section li {
+      font-size: 14px;
+      color: var(--text-muted);
+      margin-bottom: 10px;
+    }
+    .section ul, .section ol {
+      padding-left: 20px;
+    }
+    .section li { margin-bottom: 6px; }
+    .section strong { color: var(--text); font-weight: 600; }
+
+    /* ── Easter egg tooltips ───────────────────────────────────────── */
+    .easter-egg {
+      position: relative;
+      border-bottom: 1px dashed rgba(249,115,22,0.3);
+      cursor: help;
+      transition: color 0.2s;
+    }
+    .easter-egg:hover { color: var(--accent); }
+    .easter-egg .egg-tip {
+      position: absolute;
+      bottom: calc(100% + 8px);
+      left: 50%;
+      transform: translateX(-50%) scale(0.95);
+      background: var(--surface);
+      border: 1px solid var(--accent);
+      color: var(--accent);
+      font-size: 11px;
+      font-family: 'JetBrains Mono', monospace;
+      padding: 6px 12px;
+      border-radius: 6px;
+      white-space: nowrap;
+      opacity: 0;
+      pointer-events: none;
+      transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+      z-index: 100;
+    }
+    .easter-egg .egg-tip::after {
+      content: '';
+      position: absolute;
+      top: 100%;
+      left: 50%;
+      transform: translateX(-50%);
+      border: 5px solid transparent;
+      border-top-color: var(--accent);
+    }
+    .easter-egg:hover .egg-tip {
+      opacity: 1;
+      transform: translateX(-50%) scale(1);
+    }
+
+    /* ── Highlight box ────────────────────────────────────────────── */
+    .highlight-box {
+      background: rgba(249,115,22,0.05);
+      border-left: 3px solid var(--accent);
+      padding: 14px 18px;
+      border-radius: 0 8px 8px 0;
+      margin: 14px 0;
+      font-size: 13px;
+    }
+    .highlight-box.danger {
+      background: rgba(239,68,68,0.05);
+      border-left-color: var(--danger);
+    }
+    .highlight-box.blue {
+      background: rgba(59,130,246,0.05);
+      border-left-color: var(--blue);
+    }
+
+    /* ── Monospace tag ────────────────────────────────────────────── */
+    code {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px;
+      background: var(--surface);
+      padding: 2px 6px;
+      border-radius: 4px;
+      color: var(--accent);
+    }
+
+    /* ── Footer ───────────────────────────────────────────────────── */
+    .footer {
+      text-align: center;
+      padding: 40px 0 20px;
+      color: var(--text-dim);
+      font-size: 12px;
+    }
+    .footer a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    /* ── Hidden Konami sequence indicator ─────────────────────────── */
+    .konami-active .section {
+      animation: konamiPulse 0.5s ease;
+    }
+    @keyframes konamiPulse {
+      0%, 100% { border-color: var(--panel-border); }
+      50% { border-color: var(--accent); box-shadow: 0 0 20px rgba(249,115,22,0.15); }
+    }
+
+    /* ── Datum wobble animation for the datum easter egg ──────────── */
+    @keyframes datumShift {
+      0%, 100% { transform: translate(0, 0); }
+      25% { transform: translate(2px, -1px); }
+      50% { transform: translate(-1px, 2px); }
+      75% { transform: translate(1px, -2px); }
+    }
+    .datum-shift:hover {
+      animation: datumShift 0.3s ease infinite;
+      display: inline-block;
+    }
+
+    /* ── Click counter for section 7.3 ────────────────────────────── */
+    .click-counter {
+      display: none;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 10px;
+      color: var(--green);
+      margin-top: 6px;
+    }
+
+    /* ── Scroll reveal ────────────────────────────────────────────── */
+    .section {
+      opacity: 0;
+      transform: translateY(20px);
+      animation: fadeInUp 0.5s ease forwards;
+    }
+    .section:nth-child(1) { animation-delay: 0.05s; }
+    .section:nth-child(2) { animation-delay: 0.1s; }
+    .section:nth-child(3) { animation-delay: 0.15s; }
+    .section:nth-child(4) { animation-delay: 0.2s; }
+    .section:nth-child(5) { animation-delay: 0.25s; }
+    .section:nth-child(6) { animation-delay: 0.3s; }
+    .section:nth-child(7) { animation-delay: 0.35s; }
+    .section:nth-child(8) { animation-delay: 0.4s; }
+    .section:nth-child(9) { animation-delay: 0.45s; }
+    .section:nth-child(10) { animation-delay: 0.5s; }
+    .section:nth-child(11) { animation-delay: 0.55s; }
+    .section:nth-child(12) { animation-delay: 0.6s; }
+    @keyframes fadeInUp {
+      to { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Accept bar ───────────────────────────────────────────────── */
+    .accept-bar {
+      position: fixed;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: var(--panel);
+      border-top: 1px solid var(--panel-border);
+      padding: 14px 32px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      z-index: 50;
+      backdrop-filter: blur(12px);
+      transform: translateY(100%);
+      animation: slideUp 0.5s 1s ease forwards;
+    }
+    @keyframes slideUp {
+      to { transform: translateY(0); }
+    }
+    .accept-btn {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 10px 28px;
+      border-radius: 8px;
+      font-family: 'DM Sans', sans-serif;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .accept-btn:hover {
+      background: var(--accent-dim);
+      transform: translateY(-1px);
+      box-shadow: 0 4px 12px rgba(249,115,22,0.3);
+    }
+    .accept-note {
+      font-size: 12px;
+      color: var(--text-dim);
+      max-width: 400px;
+    }
+
+    /* ── Progress bar (reading progress) ──────────────────────────── */
+    .progress-bar {
+      position: fixed;
+      top: 0;
+      left: 0;
+      height: 3px;
+      background: linear-gradient(90deg, var(--accent), var(--blue));
+      z-index: 100;
+      transition: width 0.1s;
+      width: 0%;
+    }
+
+    /* ── Responsive ───────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      .container { padding: 40px 16px 100px; }
+      .section { padding: 20px 18px; }
+      .page-title { font-size: 24px; }
+      .compass { top: 16px; right: 16px; width: 36px; height: 36px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="progress-bar" id="progressBar"></div>
+  <div class="bg-grid"></div>
+  <div class="contour-bg">
+    <div class="contour-line"></div>
+    <div class="contour-line"></div>
+    <div class="contour-line"></div>
+    <div class="contour-line"></div>
+    <div class="contour-line"></div>
+    <div class="contour-line"></div>
+  </div>
+
+  <!-- Spinning compass -->
+  <svg class="compass" viewBox="0 0 100 100" title="True North... probably">
+    <circle cx="50" cy="50" r="45" fill="none" stroke="rgba(249,115,22,0.3)" stroke-width="2" />
+    <polygon points="50,10 45,50 55,50" fill="rgba(239,68,68,0.6)" />
+    <polygon points="50,90 45,50 55,50" fill="rgba(255,255,255,0.3)" />
+    <text x="50" y="8" text-anchor="middle" font-size="8" fill="rgba(249,115,22,0.5)" font-family="JetBrains Mono">N</text>
+    <text x="50" y="98" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.2)" font-family="JetBrains Mono">S</text>
+    <text x="94" y="53" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.2)" font-family="JetBrains Mono">E</text>
+    <text x="7" y="53" text-anchor="middle" font-size="8" fill="rgba(255,255,255,0.2)" font-family="JetBrains Mono">W</text>
+  </svg>
+
+  <!-- Floating survey stake -->
+  <div class="survey-stake" title="You found the benchmark!">&#x1F4CD;</div>
+
+  <div class="container">
+    <a href="./" class="back-link">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6" /></svg>
+      Back to GridForge
+    </a>
+
+    <div class="header">
+      <div class="logo-row">
+        <img src="icon.svg" width="40" height="40" alt="GridForge" />
+        <span class="logo-text">Grid<span class="forge">Forge</span><span class="gis">GIS</span></span>
+      </div>
+      <h1 class="page-title">Terms of Service</h1>
+      <p class="page-subtitle">The legal stuff. We tried to make it painless. <em>Tried.</em></p>
+      <span class="effective-date">Effective: February 14, 2026 &mdash; EPSG:4326 compliant since day one</span>
+    </div>
+
+    <!-- Section 1 -->
+    <div class="section">
+      <span class="section-number">SEC 1.0</span>
+      <h2>Acceptance of Terms</h2>
+      <p>By accessing or using GridForge GIS (the <strong>"Service"</strong>), you agree to be bound by these Terms of Service. If you do not agree, please close this tab and return to your regularly scheduled
+        <span class="easter-egg">CAD software<span class="egg-tip">We know you have 47 Civil 3D tabs open right now</span></span>.
+      </p>
+      <p>Your continued use of GridForge constitutes acceptance of these terms, including any future amendments. We will notify you of material changes by updating the effective date above, which you will never check.</p>
+      <div class="highlight-box">
+        <strong>Plain English:</strong> You use it, you agree. This is less painful than reading an Autodesk EULA, we promise.
+      </div>
+    </div>
+
+    <!-- Section 2 -->
+    <div class="section">
+      <span class="section-number">SEC 2.0</span>
+      <h2>Description of Service</h2>
+      <p>GridForge GIS is a client-side, browser-based application for spatial data interpolation, gridding, contouring, and visualization. The Service operates <strong>entirely within your browser</strong>. Your data never leaves your machine.</p>
+      <p>GridForge provides tools including but not limited to:</p>
+      <ul>
+        <li>14 gridding and interpolation algorithms (each with its own personality)</li>
+        <li><span class="easter-egg">Coordinate reference system transformations<span class="egg-tip">NAD27 to NAD83? That's a whole therapy session.</span></span></li>
+        <li>Contour generation and visualization</li>
+        <li>Data import/export in multiple formats</li>
+        <li>Measurement and spatial analysis tools</li>
+        <li>A <span class="easter-egg">TIN editor<span class="egg-tip">Delaunay would be proud. Probably.</span></span> for mesh manipulation</li>
+      </ul>
+      <div class="highlight-box blue">
+        <strong>Note:</strong> GridForge is not a replacement for professional surveying equipment. Please do not attempt to do a boundary survey with your laptop screen.
+      </div>
+    </div>
+
+    <!-- Section 3 -->
+    <div class="section">
+      <span class="section-number">SEC 3.0</span>
+      <h2>User Responsibilities</h2>
+      <p>You, the user (hereinafter, <strong>"the person who should have read this"</strong>), are solely responsible for:</p>
+      <ol>
+        <li><strong>Data accuracy</strong> &mdash; You are responsible for the quality, accuracy, and integrity of all data you import into GridForge. Garbage in, garbage out. <span class="easter-egg">We don't do field verification.<span class="egg-tip">That's what the intern with the total station is for.</span></span></li>
+        <li><strong>Appropriate use</strong> &mdash; Ensuring that your use of generated outputs (grids, contours, surfaces) is suitable for your intended application.</li>
+        <li><strong>Professional review</strong> &mdash; All outputs should be reviewed by a qualified professional before being used for engineering, construction, or regulatory purposes.</li>
+        <li><strong>Data backup</strong> &mdash; Maintaining backups of your source data. If your browser crashes mid-interpolation, that's between you and your IT department.</li>
+        <li><strong>CRS selection</strong> &mdash; Choosing the correct <span class="easter-egg datum-shift">coordinate reference system<span class="egg-tip">If your building is 200m offshore, check your datum.</span></span>. We will not be held liable for structures built in the wrong hemisphere.</li>
+      </ol>
+    </div>
+
+    <!-- Section 4 -->
+    <div class="section">
+      <span class="section-number">SEC 4.0</span>
+      <h2>Limitation of Liability</h2>
+      <p>TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, GRIDFORGE GIS AND ITS CONTRIBUTORS SHALL NOT BE LIABLE FOR ANY:</p>
+      <ul>
+        <li>Direct, indirect, incidental, special, consequential, or punitive damages</li>
+        <li>Loss of data, profits, goodwill, or other intangible losses</li>
+        <li>Damages resulting from unauthorized access to your data (reminder: it's all local)</li>
+        <li>Damages resulting from <span class="easter-egg">interpolation artifacts<span class="egg-tip">Those "bull's-eye" contours aren't a feature, they're IDW being IDW.</span></span>, grid errors, or contour anomalies</li>
+        <li>Damages arising from incorrect CRS transformations, datum shifts, or projection errors</li>
+        <li>Any claim that your <span class="easter-egg">Kriging variogram<span class="egg-tip">Your nugget is showing.</span></span> doesn't look right</li>
+      </ul>
+      <div class="highlight-box danger">
+        <strong>IN ALL CAPS BECAUSE LAWYERS SAID SO:</strong> THE SERVICE IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTIES OF ANY KIND, EITHER EXPRESS OR IMPLIED. WE MAKE NO WARRANTY THAT THE SERVICE WILL BE UNINTERRUPTED, SECURE, OR ERROR-FREE. UNLIKE YOUR <span class="easter-egg" style="color: var(--danger)">CIVIL 3D LICENSE<span class="egg-tip">At least we don't charge $3,885/year to crash.</span></span>, THIS SOFTWARE IS FREE.
+      </div>
+      <p>In no event shall the total liability of GridForge exceed the amount you paid for the Service, which is <code>$0.00</code>. We acknowledge this makes the math very easy.</p>
+    </div>
+
+    <!-- Section 5 -->
+    <div class="section">
+      <span class="section-number">SEC 5.0</span>
+      <h2>Intellectual Property</h2>
+      <p>GridForge GIS is released under the <strong>MIT License</strong>. You are free to use, modify, and distribute the software in accordance with that license.</p>
+      <p>Your data remains yours. We never see it, touch it, or <span class="easter-egg">reproject it without asking<span class="egg-tip">Looking at you, Google Earth KML import.</span></span>. What happens in your browser stays in your browser.</p>
+      <p>The GridForge name, logo, and visual design are maintained by the project contributors. Please don't use them to imply endorsement of your product that generates contours from three data points and calls it a "surface model."</p>
+    </div>
+
+    <!-- Section 6 -->
+    <div class="section">
+      <span class="section-number">SEC 6.0</span>
+      <h2>Accuracy Disclaimer</h2>
+      <p>GridForge is a <strong>computational tool</strong>, not an oracle. While we implement published, peer-reviewed algorithms to the best of our ability:</p>
+      <ul>
+        <li>Interpolation results are <strong>estimates</strong>, not ground truth. If you need ground truth, go outside with a <span class="easter-egg">rod and level<span class="egg-tip">Just make sure you're holding the rod right side up. You'd be surprised.</span></span>.</li>
+        <li>Grid resolution does not create information. A 0.1m grid from 10 points spread over 10km is art, not science.</li>
+        <li>Contour lines generated by this software are mathematical constructs. They should not be used as the sole basis for engineering decisions, regulatory filings, or arguments with your project manager.</li>
+        <li>The <span class="easter-egg">minimum curvature<span class="egg-tip">It's not magic, it's biharmonic spline relaxation. Okay, it's a little magic.</span></span> algorithm will produce a smooth surface. Whether that surface represents reality is your responsibility to verify.</li>
+      </ul>
+      <div class="highlight-box">
+        <strong>Survey Proverb:</strong> "A surveyor with one total station knows exactly where a point is. A surveyor with two total stations is never quite sure."
+      </div>
+    </div>
+
+    <!-- Section 7 -->
+    <div class="section">
+      <span class="section-number">SEC 7.0</span>
+      <h2>Prohibited Uses</h2>
+      <p>You agree not to use GridForge for:</p>
+      <ol>
+        <li>Any activity that violates applicable local, state, national, or international law</li>
+        <li>Generating misleading or fraudulent survey data</li>
+        <li>Submitting interpolated data as original survey observations to regulatory bodies</li>
+        <li>Creating contour maps of your ex's emotional availability</li>
+        <li>Operating <span class="easter-egg">autonomous vehicles<span class="egg-tip">Please do not use IDW to navigate.</span></span> based on GridForge output</li>
+        <li>Attempting to convince clients that Kriging is "basically AI"</li>
+        <li>Using the <span class="easter-egg">3D view<span class="egg-tip">We see you spinning it around in the client meeting.</span></span> solely to impress stakeholders without understanding the underlying data</li>
+      </ol>
+    </div>
+
+    <!-- Section 8 -->
+    <div class="section">
+      <span class="section-number">SEC 8.0</span>
+      <h2>Data Privacy</h2>
+      <p>GridForge processes all data <strong>locally in your browser</strong>. We operate a strict <span class="easter-egg">zero-knowledge architecture<span class="egg-tip">We literally cannot see your data. It's not a feature, it's a budget constraint that worked out great.</span></span>:</p>
+      <ul>
+        <li>No data is transmitted to any server, ever</li>
+        <li>No analytics, tracking cookies, or telemetry</li>
+        <li>No user accounts or authentication</li>
+        <li>No cloud storage or sync</li>
+        <li>The only network requests are for optional base map tiles (OpenStreetMap, ArcGIS) and CRS definitions from <code>epsg.io</code></li>
+      </ul>
+      <p>If someone asks where your data goes, the answer is: "Nowhere. It stays right here." Point at your screen. <span class="easter-egg">Assert dominance.<span class="egg-tip">Surveyors have been asserting property dominance since 1785.</span></span></p>
+    </div>
+
+    <!-- Section 9 -->
+    <div class="section">
+      <span class="section-number">SEC 9.0</span>
+      <h2>Third-Party Services</h2>
+      <p>GridForge integrates with the following third-party services for enhanced functionality:</p>
+      <ul>
+        <li><strong>OpenStreetMap</strong> &mdash; Base map tiles. Subject to <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener" style="color:var(--accent)">OSM's terms</a>.</li>
+        <li><strong>ArcGIS Online</strong> &mdash; Satellite and topographic tiles. Subject to <a href="https://www.esri.com/en-us/legal/terms/full-master-agreement" target="_blank" rel="noopener" style="color:var(--accent)">Esri's terms</a>.</li>
+        <li><strong>epsg.io</strong> &mdash; Coordinate reference system definitions. Because memorizing <span class="easter-egg">PROJ strings<span class="egg-tip">+proj=tmerc +lat_0=0 +lon_0=-81 +k=0.9996 +x_0=500000... you okay?</span></span> is not a hobby we endorse.</li>
+        <li><strong>Google Fonts</strong> &mdash; Typography (DM Sans, JetBrains Mono). Your fonts are loaded from Google's CDN.</li>
+      </ul>
+      <p>We are not responsible for the availability, accuracy, or terms of these third-party services. If OpenStreetMap goes down, your points are still there. They're just floating in the void.</p>
+    </div>
+
+    <!-- Section 10 -->
+    <div class="section">
+      <span class="section-number">SEC 10.0</span>
+      <h2>Indemnification</h2>
+      <p>You agree to indemnify and hold harmless GridForge, its contributors, and maintainers from and against any claims, damages, losses, liabilities, costs, and expenses (including reasonable attorneys' fees) arising from:</p>
+      <ul>
+        <li>Your use or misuse of the Service</li>
+        <li>Your violation of these Terms</li>
+        <li>Your violation of any third-party rights</li>
+        <li>Any data you import, process, or export using the Service</li>
+        <li>Any decisions made based on GridForge output without <span class="easter-egg">independent verification<span class="egg-tip">Measure twice, interpolate once.</span></span></li>
+      </ul>
+      <div class="highlight-box">
+        <strong>Translation:</strong> If something goes wrong because you used our contours to site a building and didn't verify with actual survey data, that's on you. We're an interpolation tool, not a licensed surveyor.
+      </div>
+    </div>
+
+    <!-- Section 11 -->
+    <div class="section">
+      <span class="section-number">SEC 11.0</span>
+      <h2>Termination</h2>
+      <p>You may stop using GridForge at any time by closing the browser tab. No cancellation fee. No exit interview. No <span class="easter-egg">license deactivation headaches<span class="egg-tip">*cough* FlexNet *cough*</span></span>.</p>
+      <p>We reserve the right to modify or discontinue the Service at any time without notice, though given this is open-source, the code will outlive us all on GitHub.</p>
+      <p>Upon termination, all provisions of these Terms that by their nature should survive (including limitation of liability, indemnification, and the survey jokes) will survive.</p>
+    </div>
+
+    <!-- Section 12 -->
+    <div class="section">
+      <span class="section-number">SEC 12.0</span>
+      <h2>Miscellaneous</h2>
+      <p><strong>Governing Law:</strong> These Terms shall be governed by the laws of the jurisdiction in which you reside, or <span class="easter-egg">WGS 84<span class="egg-tip">The only datum that governs us all.</span></span>, whichever feels more universal.</p>
+      <p><strong>Severability:</strong> If any provision of these Terms is found to be unenforceable, the remaining provisions shall remain in full force and effect. Unlike a TIN with a deleted triangle, the rest of the mesh holds.</p>
+      <p><strong>Entire Agreement:</strong> These Terms constitute the entire agreement between you and GridForge regarding the Service. Any prior understandings, <span class="easter-egg">verbal control points<span class="egg-tip">Verbal control points have a CEP of approximately &plusmn; "I think it was somewhere around here."</span></span>, or handshake deals are hereby superseded.</p>
+      <p><strong>Contact:</strong> For questions about these Terms, please open an issue on our <a href="https://github.com/munah-a/grid-forge" target="_blank" rel="noopener" style="color:var(--accent)">GitHub repository</a>. Response time is proportional to the inverse distance weighting of our availability.</p>
+    </div>
+
+    <!-- Hidden section 13 - only visible via Konami code -->
+    <div class="section" id="secretSection" style="display:none; border-color: var(--accent); background: linear-gradient(135deg, var(--panel), rgba(249,115,22,0.03));">
+      <span class="section-number" style="background: var(--accent); color: #fff;">SEC 13.37</span>
+      <h2>Secret Provisions (You Found the Easter Egg!)</h2>
+      <p>Congratulations, you absolute legend. You entered the Konami Code on a Terms of Service page. Here are your bonus clauses:</p>
+      <ul>
+        <li>You are hereby granted the title of <strong>"Honorary Geodesist"</strong></li>
+        <li>You may refer to IDW artifacts as "features" in exactly one (1) client presentation</li>
+        <li>Your variogram sill is valid. We believe in you.</li>
+        <li>Civil 3D is required to behave for the remainder of today. (Not legally binding. Civil 3D does what it wants.)</li>
+        <li>The next time someone says "can't you just use Google Earth for that?", you are permitted one (1) dramatic sigh</li>
+        <li>All your error of closure is forgiven. Go in peace.</li>
+      </ul>
+      <p style="text-align: center; margin-top: 16px; font-size: 20px;" id="partyEmojis"></p>
+    </div>
+
+    <div class="footer">
+      <p>GridForge GIS &mdash; Open Source under MIT License</p>
+      <p style="margin-top: 4px;"><a href="https://github.com/munah-a/grid-forge" target="_blank" rel="noopener">GitHub</a> &nbsp;&middot;&nbsp; <a href="./">Launch App</a></p>
+      <p style="margin-top: 12px; font-size: 10px; color: var(--text-dim);">
+        No benchmarks were harmed in the making of this document.<br />
+        <span id="coordsFooter" style="font-family: 'JetBrains Mono', monospace;"></span>
+      </p>
+    </div>
+  </div>
+
+  <!-- Accept bar -->
+  <div class="accept-bar" id="acceptBar">
+    <span class="accept-note">By continuing to use GridForge, you accept these Terms of Service.</span>
+    <button class="accept-btn" id="acceptBtn">I Accept</button>
+  </div>
+
+  <script>
+    // ── Reading progress bar ──────────────────────────────────────
+    const progressBar = document.getElementById('progressBar');
+    window.addEventListener('scroll', () => {
+      const scrollTop = document.documentElement.scrollTop;
+      const scrollHeight = document.documentElement.scrollHeight - document.documentElement.clientHeight;
+      const progress = scrollHeight > 0 ? (scrollTop / scrollHeight) * 100 : 0;
+      progressBar.style.width = progress + '%';
+    }, { passive: true });
+
+    // ── Accept button ─────────────────────────────────────────────
+    const acceptBar = document.getElementById('acceptBar');
+    const acceptBtn = document.getElementById('acceptBtn');
+    let clickCount = 0;
+    const phrases = [
+      "I Accept",
+      "I Really Accept",
+      "I Accept (For Real)",
+      "OK Fine I Read It",
+      "I Pinky Promise",
+      "On My Honor as a Surveyor",
+      "I Accept (No Takebacks)",
+      "Accepted \u2714"
+    ];
+    acceptBtn.addEventListener('click', () => {
+      clickCount++;
+      if (clickCount < phrases.length) {
+        acceptBtn.textContent = phrases[clickCount];
+        acceptBtn.style.transform = 'scale(1.05)';
+        setTimeout(() => acceptBtn.style.transform = '', 150);
+      } else {
+        acceptBar.style.transform = 'translateY(100%)';
+        acceptBar.style.transition = 'transform 0.5s ease';
+        // Show a little celebration
+        const toast = document.createElement('div');
+        toast.textContent = 'Terms accepted! Your error of closure has been forgiven.';
+        toast.style.cssText = `
+          position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+          background: var(--green); color: #fff; padding: 12px 24px; border-radius: 8px;
+          font-family: 'DM Sans', sans-serif; font-size: 14px; font-weight: 600;
+          z-index: 100; animation: fadeInUp 0.3s ease;
+        `;
+        document.body.appendChild(toast);
+        setTimeout(() => toast.remove(), 4000);
+      }
+    });
+
+    // ── Konami Code ───────────────────────────────────────────────
+    const konamiSequence = [38,38,40,40,37,39,37,39,66,65]; // up up down down left right left right B A
+    let konamiIndex = 0;
+    document.addEventListener('keydown', (e) => {
+      if (e.keyCode === konamiSequence[konamiIndex]) {
+        konamiIndex++;
+        if (konamiIndex === konamiSequence.length) {
+          konamiIndex = 0;
+          activateKonami();
+        }
+      } else {
+        konamiIndex = 0;
+      }
+    });
+
+    function activateKonami() {
+      const secret = document.getElementById('secretSection');
+      secret.style.display = 'block';
+      secret.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      document.body.classList.add('konami-active');
+      setTimeout(() => document.body.classList.remove('konami-active'), 2000);
+
+      // Party emojis rain
+      const party = document.getElementById('partyEmojis');
+      const emojis = ['\uD83D\uDCCD','\uD83D\uDDFA\uFE0F','\uD83E\uDDED','\u26F0\uFE0F','\uD83C\uDF0D','\uD83D\uDCD0','\uD83D\uDE80','\u2B50'];
+      let em = '';
+      for (let i = 0; i < 20; i++) em += emojis[Math.floor(Math.random() * emojis.length)] + ' ';
+      party.textContent = em;
+    }
+
+    // ── Random coordinates in footer ─────────────────────────────
+    const lat = (Math.random() * 180 - 90).toFixed(6);
+    const lon = (Math.random() * 360 - 180).toFixed(6);
+    document.getElementById('coordsFooter').textContent =
+      'You are approximately nowhere near ' + lat + '\u00B0, ' + lon + '\u00B0';
+
+    // ── Cursor coordinate tracker (mini easter egg) ──────────────
+    document.addEventListener('mousemove', (e) => {
+      const compass = document.querySelector('.compass');
+      if (compass) {
+        const rect = compass.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const angle = Math.atan2(e.clientY - cy, e.clientX - cx) * (180 / Math.PI) + 90;
+        // Subtle: compass needle follows cursor when hovering near it
+        const dist = Math.sqrt((e.clientX - cx) ** 2 + (e.clientY - cy) ** 2);
+        if (dist < 200) {
+          compass.style.animationPlayState = 'paused';
+          compass.style.transform = 'rotate(' + angle + 'deg)';
+        } else {
+          compass.style.animationPlayState = '';
+          compass.style.transform = '';
+        }
+      }
+    }, { passive: true });
+
+    // ── Triple-click section 7 item 6 easter egg ─────────────────
+    document.querySelectorAll('.section').forEach(sec => {
+      const heading = sec.querySelector('h2');
+      if (heading && heading.textContent.includes('Prohibited')) {
+        sec.addEventListener('dblclick', () => {
+          sec.style.transition = 'transform 0.3s ease';
+          sec.style.transform = 'rotate(' + (Math.random() * 2 - 1) + 'deg)';
+          setTimeout(() => sec.style.transform = '', 500);
+        });
+      }
+    });
+  </script>
+</body>
+</html>

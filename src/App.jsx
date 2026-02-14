@@ -31,7 +31,7 @@ const APP_VERSION = "1.0.0-rc.9";
 // ─── Theme Colors ─────────────────────────────────────────────────────────────
 const C = {
   bg: "#0a0f1e", panel: "#0f1629", panelBorder: "#1a2340", surface: "#141c33",
-  surfaceHover: "#1a2545", text: "#e2e8f0", textMuted: "#8494a7", textDim: "#5a6d81",
+  surfaceHover: "#1a2545", text: "#e2e8f0", textMuted: "#8494a7", textDim: "#728a9e",
   accent: "#f97316", accentDim: "#c2410c", blue: "#1e40af", blueLight: "#3b82f6",
   green: "#22c55e", greenDim: "#166534", danger: "#ef4444", white: "#ffffff",
 };
@@ -78,38 +78,38 @@ const STYLE_PRESETS = [
 
 // ─── Icons (SVG components) ──────────────────────────────────────────────────
 const I = {
-  Upload: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>,
-  Grid: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M3 15h18M9 3v18M15 3v18" /></svg>,
-  Layers: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></svg>,
-  Eye: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>,
-  EyeOff: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>,
-  Settings: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>,
-  Map: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" /><line x1="8" y1="2" x2="8" y2="18" /><line x1="16" y1="6" x2="16" y2="22" /></svg>,
-  Trash: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>,
-  Play: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>,
-  Plus: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>,
-  Table: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="9" y1="3" x2="9" y2="21" /></svg>,
-  Crosshair: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="22" y1="12" x2="18" y2="12" /><line x1="6" y1="12" x2="2" y2="12" /><line x1="12" y1="6" x2="12" y2="2" /><line x1="12" y1="22" x2="12" y2="18" /></svg>,
-  Download: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>,
-  Globe: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><ellipse cx="12" cy="12" rx="4" ry="10" /><line x1="2" y1="12" x2="22" y2="12" /></svg>,
-  Compass: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" fillOpacity="0.3" /></svg>,
-  Mountain: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3l4 8 5-5 5 15H2z" /></svg>,
-  Columns: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="18" rx="1" /><rect x="14" y="3" width="7" height="18" rx="1" /></svg>,
-  Ruler: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.5 6.5l-4-4L3 17l4 4 14.5-14.5z" /><path d="M14 7l1 1M10 11l1 1M6 15l1 1" /></svg>,
-  Save: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>,
-  Box3D: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" /></svg>,
-  Copy: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>,
-  ChevUp: () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="18 15 12 9 6 15" /></svg>,
-  ChevDown: () => <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>,
-  Filter: () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>,
-  Boundary: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="3 6 9 3 21 6 21 18 9 21 3 18" strokeDasharray="3 2" /><line x1="9" y1="3" x2="9" y2="21" /></svg>,
-  Bug: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>,
-  Undo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>,
-  Redo: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10" /></svg>,
-  HelpCircle: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>,
-  Edit: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>,
-  Printer: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>,
-  Triangle: () => <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3L2 21h20L12 3z" /><circle cx="12" cy="3" r="1.5" fill="currentColor" /><circle cx="2" cy="21" r="1.5" fill="currentColor" /><circle cx="22" cy="21" r="1.5" fill="currentColor" /></svg>,
+  Upload: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>,
+  Grid: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M3 9h18M3 15h18M9 3v18M15 3v18" /></svg>,
+  Layers: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="12 2 2 7 12 12 22 7 12 2" /><polyline points="2 17 12 22 22 17" /><polyline points="2 12 12 17 22 12" /></svg>,
+  Eye: () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" /><circle cx="12" cy="12" r="3" /></svg>,
+  EyeOff: () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24" /><line x1="1" y1="1" x2="23" y2="23" /></svg>,
+  Settings: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" /></svg>,
+  Map: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="1 6 1 22 8 18 16 22 23 18 23 2 16 6 8 2 1 6" /><line x1="8" y1="2" x2="8" y2="18" /><line x1="16" y1="6" x2="16" y2="22" /></svg>,
+  Trash: () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6" /><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /></svg>,
+  Play: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><polygon points="5 3 19 12 5 21 5 3" /></svg>,
+  Plus: () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" /></svg>,
+  Table: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="9" y1="3" x2="9" y2="21" /></svg>,
+  Crosshair: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="22" y1="12" x2="18" y2="12" /><line x1="6" y1="12" x2="2" y2="12" /><line x1="12" y1="6" x2="12" y2="2" /><line x1="12" y1="22" x2="12" y2="18" /></svg>,
+  Download: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" /></svg>,
+  Globe: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><ellipse cx="12" cy="12" rx="4" ry="10" /><line x1="2" y1="12" x2="22" y2="12" /></svg>,
+  Compass: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><polygon points="16.24 7.76 14.12 14.12 7.76 16.24 9.88 9.88 16.24 7.76" fill="currentColor" fillOpacity="0.3" /></svg>,
+  Mountain: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M8 3l4 8 5-5 5 15H2z" /></svg>,
+  Columns: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="18" rx="1" /><rect x="14" y="3" width="7" height="18" rx="1" /></svg>,
+  Ruler: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21.5 6.5l-4-4L3 17l4 4 14.5-14.5z" /><path d="M14 7l1 1M10 11l1 1M6 15l1 1" /></svg>,
+  Save: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z" /><polyline points="17 21 17 13 7 13 7 21" /><polyline points="7 3 7 8 15 8" /></svg>,
+  Box3D: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 2L2 7l10 5 10-5-10-5z" /><path d="M2 17l10 5 10-5" /><path d="M2 12l10 5 10-5" /></svg>,
+  Copy: () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>,
+  ChevUp: () => <svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="18 15 12 9 6 15" /></svg>,
+  ChevDown: () => <svg aria-hidden="true" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 12 15 18 9" /></svg>,
+  Filter: () => <svg aria-hidden="true" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3" /></svg>,
+  Boundary: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polygon points="3 6 9 3 21 6 21 18 9 21 3 18" strokeDasharray="3 2" /><line x1="9" y1="3" x2="9" y2="21" /></svg>,
+  Bug: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><line x1="12" y1="8" x2="12" y2="12" /><line x1="12" y1="16" x2="12.01" y2="16" /></svg>,
+  Undo: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="1 4 1 10 7 10" /><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10" /></svg>,
+  Redo: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.13-9.36L23 10" /></svg>,
+  HelpCircle: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10" /><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" /><line x1="12" y1="17" x2="12.01" y2="17" /></svg>,
+  Edit: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" /><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" /></svg>,
+  Printer: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="6 9 6 2 18 2 18 9" /><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" /><rect x="6" y="14" width="12" height="8" /></svg>,
+  Triangle: () => <svg aria-hidden="true" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3L2 21h20L12 3z" /><circle cx="12" cy="3" r="1.5" fill="currentColor" /><circle cx="2" cy="21" r="1.5" fill="currentColor" /><circle cx="22" cy="21" r="1.5" fill="currentColor" /></svg>,
 };
 
 // ─── Sub-components ──────────────────────────────────────────────────────────
@@ -121,9 +121,9 @@ function Tooltip({ children, text }) {
     </div>
   );
 }
-function Sel({ value, onChange, options, style }) {
+function Sel({ value, onChange, options, style, "aria-label": ariaLabel }) {
   return (
-    <select value={value} onChange={e => onChange(e.target.value)} style={{ background: C.surface, color: C.text, border: `1px solid ${C.panelBorder}`, borderRadius: 6, padding: "6px 10px", fontSize: 12, outline: "none", cursor: "pointer", appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center", paddingRight: 28, ...style }}>
+    <select value={value} onChange={e => onChange(e.target.value)} aria-label={ariaLabel} style={{ background: C.surface, color: C.text, border: `1px solid ${C.panelBorder}`, borderRadius: 6, padding: "6px 10px", fontSize: 12, outline: "none", cursor: "pointer", appearance: "none", backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E")`, backgroundRepeat: "no-repeat", backgroundPosition: "right 8px center", paddingRight: 28, ...style }}>
       {options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
     </select>
   );
@@ -132,8 +132,8 @@ function Sld({ value, onChange, min, max, step = 1, label, showValue = true }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
       {label && <span style={{ fontSize: 11, color: C.textMuted, minWidth: 70 }}>{label}</span>}
-      <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(+e.target.value)} style={{ flex: 1, accentColor: C.accent, height: 4, cursor: "pointer" }} />
-      {showValue && <span style={{ fontSize: 11, color: C.textMuted, minWidth: 30, textAlign: "right" }}>{value}</span>}
+      <input type="range" min={min} max={max} step={step} value={value} onChange={e => onChange(+e.target.value)} aria-label={label} style={{ flex: 1, accentColor: C.accent, height: 4, cursor: "pointer" }} />
+      {showValue && <span style={{ fontSize: 11, color: C.textMuted, minWidth: 30, textAlign: "right" }} aria-hidden="true">{value}</span>}
     </div>
   );
 }
@@ -2906,7 +2906,7 @@ export default function GridForgeGIS() {
       `}</style>
 
       {/* ─── Top Bar ──────────────────────────────────────────────────────── */}
-      <div style={{ display: "flex", alignItems: "center", height: 44, padding: "0 16px", background: C.panel, borderBottom: `1px solid ${C.panelBorder}`, gap: 12, flexShrink: 0 }}>
+      <header style={{ display: "flex", alignItems: "center", height: 44, padding: "0 16px", background: C.panel, borderBottom: `1px solid ${C.panelBorder}`, gap: 12, flexShrink: 0 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <img src={import.meta.env.BASE_URL + "icon.svg"} width="28" height="28" alt="Logo" style={{ borderRadius: 6 }} />
           <span style={{ fontWeight: 700, fontSize: 15, letterSpacing: -0.3 }}>Grid<span style={{ color: C.accent }}>Forge</span><span style={{ color: C.textMuted, fontWeight: 400, fontSize: 11, marginLeft: 6 }}>GIS</span><span style={{ fontSize: 9, color: C.accent, background: C.accent + "18", padding: "2px 6px", borderRadius: 4, marginLeft: 8, fontWeight: 600, letterSpacing: 0.3 }}>v{APP_VERSION}</span></span>
@@ -2927,12 +2927,12 @@ export default function GridForgeGIS() {
           <Btn size="sm" onClick={loadSample} variant="primary"><I.Plus /> Sample</Btn>
           <Btn size="sm" onClick={() => setShowBugReport(true)} title="Report a Bug" aria-label="Report a Bug"><I.Bug /></Btn>
         </div>
-      </div>
+      </header>
 
       {/* ─── Main Layout ──────────────────────────────────────────────────── */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
         {/* Sidebar */}
-        <div style={{ width: 52, background: C.panel, borderRight: `1px solid ${C.panelBorder}`, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 8, gap: 4 }}>
+        <nav aria-label="Tools" style={{ width: 52, background: C.panel, borderRight: `1px solid ${C.panelBorder}`, display: "flex", flexDirection: "column", alignItems: "center", paddingTop: 8, gap: 4 }}>
           {panelBtns.map(btn => (
             <Tooltip key={btn.id} text={btn.label}>
               <button aria-label={btn.label} onClick={() => setActivePanel(activePanel === btn.id ? null : btn.id)} style={{ width: 38, height: 38, borderRadius: 8, border: "none", background: activePanel === btn.id ? C.accent + "22" : "transparent", color: activePanel === btn.id ? C.accent : C.textMuted, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}><btn.icon /></button>
@@ -2940,10 +2940,10 @@ export default function GridForgeGIS() {
           ))}
           <div style={{ flex: 1 }} />
           <Tooltip text="Data Table"><button aria-label="Data Table" onClick={() => setShowTable(!showTable)} style={{ width: 38, height: 38, borderRadius: 8, border: "none", background: showTable ? C.green + "22" : "transparent", color: showTable ? C.green : C.textMuted, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 8 }}><I.Table /></button></Tooltip>
-        </div>
+        </nav>
 
         {/* ─── Side Panel ─────────────────────────────────────────────────── */}
-        {activePanel && <div style={{ width: 320, background: C.panel, borderRight: `1px solid ${C.panelBorder}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {activePanel && <aside aria-label="Panel" style={{ width: 320, background: C.panel, borderRight: `1px solid ${C.panelBorder}`, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           <div style={{ padding: "12px 16px", borderBottom: `1px solid ${C.panelBorder}`, fontWeight: 600, fontSize: 13, display: "flex", alignItems: "center", gap: 8 }}>
             {activePanel === "import" && <><I.Upload /> Import Data</>}
             {activePanel === "mapping" && <><I.Map /> Column Mapping</>}
@@ -3940,6 +3940,14 @@ export default function GridForgeGIS() {
                   </div>
                 </div>
               ))}
+              <div style={{ borderTop: `1px solid ${C.panelBorder}`, paddingTop: 14, marginTop: 8, display: "flex", flexDirection: "column", gap: 8 }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: C.accent, marginBottom: 2 }}>Legal</div>
+                <a href={import.meta.env.BASE_URL + "tos.html"} target="_blank" rel="noopener noreferrer" style={{ fontSize: 11, color: C.textMuted, textDecoration: "none", display: "flex", alignItems: "center", gap: 6, padding: "6px 8px", borderRadius: 6, background: C.surface, border: `1px solid ${C.panelBorder}`, transition: "all 0.15s", cursor: "pointer" }} onMouseOver={e => { e.currentTarget.style.borderColor = C.accent; e.currentTarget.style.color = C.accent; }} onMouseOut={e => { e.currentTarget.style.borderColor = C.panelBorder; e.currentTarget.style.color = C.textMuted; }}>
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><polyline points="14 2 14 8 20 8" /></svg>
+                  Terms of Service
+                </a>
+                <div style={{ fontSize: 10, color: C.textDim, lineHeight: 1.5 }}>GridForge GIS is open-source under the MIT License. Your data never leaves your browser.</div>
+              </div>
             </div>}
 
             {/* ── Plot Panel ───────────────────────────────────────────── */}
@@ -4104,10 +4112,10 @@ export default function GridForgeGIS() {
               </div>
             </div>}
           </div>
-        </div>}
+        </aside>}
 
         {/* ─── Map Canvas ─────────────────────────────────────────────────── */}
-        <div ref={containerRef} style={{ flex: 1, position: "relative", overflow: "hidden" }} onDrop={handleDrop} onDragOver={e => e.preventDefault()}>
+        <main ref={containerRef} style={{ flex: 1, position: "relative", overflow: "hidden" }} onDrop={handleDrop} onDragOver={e => e.preventDefault()}>
           <canvas ref={canvasRef} role="img" aria-label={`GIS map canvas. ${points.length} points loaded${gridData ? `, ${gridData.nx}×${gridData.ny} grid` : ""}. Mode: ${viewMode}`} onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp} onClick={handleCanvasClick} onDoubleClick={handleCanvasDblClick} onContextMenu={handleContextMenu}
             style={{ width: "100%", height: "100%", cursor: editNodesMode ? "crosshair" : drawMode ? "crosshair" : measureMode ? "crosshair" : dragRef.current.dragging ? "grabbing" : "crosshair" }}>GIS map view</canvas>
 
@@ -4181,11 +4189,11 @@ export default function GridForgeGIS() {
             {drawMode && <span style={{ color: C.accent }}>Drawing: {drawMode.replace(/_/g, " ")}</span>}
             {measureMode && <span style={{ color: C.accent }}>Tool: {measureMode}</span>}
             <div style={{ flex: 1 }} />
-            {baseMap === "osm" && <span style={{ fontSize: 9 }}>© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener" style={{ color: C.textMuted, textDecoration: "none" }}>OpenStreetMap</a></span>}
-            {baseMap === "satellite" && <span style={{ fontSize: 9, color: C.textDim }}>© Esri</span>}
+            {baseMap === "osm" && <span style={{ fontSize: 9 }}>© <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener" style={{ color: C.textMuted, textDecoration: "none" }}>OpenStreetMap</a> contributors</span>}
+            {baseMap === "satellite" && <span style={{ fontSize: 9, color: C.textDim }}>© <a href="https://www.esri.com/en-us/legal/terms/full-master-agreement" target="_blank" rel="noopener" style={{ color: C.textDim, textDecoration: "none" }}>Esri</a>, Maxar, Earthstar Geographics</span>}
             <span onClick={() => setShowCRSPrompt(true)} style={{ cursor: "pointer" }}>CRS: <span style={{ color: projectCRS === "LOCAL" ? C.textDim : C.blueLight }}>{projectCRS === "LOCAL" ? "Local" : projectCRS}</span></span>
           </div>
-        </div>
+        </main>
       </div>
 
       {/* ─── Screen reader status announcements ─────────────────────────── */}
@@ -4264,7 +4272,7 @@ export default function GridForgeGIS() {
       </div>}
 
       {/* ─── Plot Preview Modal ────────────────────────────────────────────── */}
-      {showPlotPreview && <div style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "auto" }} onClick={() => setShowPlotPreview(false)}>
+      {showPlotPreview && <div role="dialog" aria-modal="true" aria-label="Plot Preview" style={{ position: "fixed", inset: 0, zIndex: 9999, background: "rgba(0,0,0,0.85)", display: "flex", alignItems: "center", justifyContent: "center", overflow: "auto" }} onClick={() => setShowPlotPreview(false)}>
         <div id="plot-preview-container" style={{ position: "relative", maxWidth: "95vw", maxHeight: "95vh", overflow: "auto", background: "#fff", borderRadius: 8, boxShadow: "0 20px 60px rgba(0,0,0,0.5)" }} onClick={e => e.stopPropagation()}>
           <canvas ref={plotCanvasRef} style={{ display: "block", maxWidth: "100%", height: "auto" }} />
           <button onClick={() => setShowPlotPreview(false)} style={{ position: "absolute", top: 8, right: 8, width: 32, height: 32, borderRadius: 16, border: "none", background: "rgba(0,0,0,0.6)", color: "#fff", cursor: "pointer", fontSize: 18, display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>

@@ -7,7 +7,7 @@
 | **Version** | 1.0 |
 | **Date** | February 11, 2026 |
 | **Status** | Draft |
-| **Classification** | Internal / Confidential |
+| **Classification** | Public |
 
 ---
 

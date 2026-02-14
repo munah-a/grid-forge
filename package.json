@@ -2,6 +2,8 @@
   "name": "grid-forge-gis",
   "version": "1.0.0-rc.9",
   "description": "Client-side GIS web application for gridding, contouring & spatial visualization",
+  "author": "Munah A",
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "dev": "vite",

@@ -5,11 +5,34 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="description"
-    content="GridForge GIS - Professional browser-based gridding, contouring & GIS visualization" />
+    content="GridForge GIS - Professional browser-based gridding, contouring & GIS visualization. 14 interpolation algorithms, zero install, your data never leaves your browser." />
+  <meta name="theme-color" content="#0a0f1e" />
   <meta http-equiv="Content-Security-Policy"
-    content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.arcgisonline.com https://server.arcgisonline.com; connect-src 'self' https://epsg.io https://*.tile.openstreetmap.org https://*.arcgisonline.com https://server.arcgisonline.com; worker-src 'self' blob:;" />
+    content="default-src 'self'; script-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob: https://*.tile.openstreetmap.org https://*.arcgisonline.com https://server.arcgisonline.com; connect-src 'self' https://epsg.io https://*.tile.openstreetmap.org https://*.arcgisonline.com https://server.arcgisonline.com; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self';" />
+
+  <!-- Open Graph -->
+  <meta property="og:type" content="website" />
+  <meta property="og:title" content="GridForge GIS" />
+  <meta property="og:description"
+    content="Professional browser-based gridding, contouring & GIS visualization. 14 interpolation algorithms, zero install, 100% client-side." />
+  <meta property="og:url" content="https://munah-a.github.io/grid-forge/" />
+  <meta property="og:site_name" content="GridForge GIS" />
+  <meta property="og:image" content="https://munah-a.github.io/grid-forge/icon.svg" />
+
+  <!-- Twitter Card -->
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="GridForge GIS" />
+  <meta name="twitter:description"
+    content="Professional browser-based gridding, contouring & GIS visualization. 14 interpolation algorithms, zero install." />
+  <meta name="twitter:image" content="https://munah-a.github.io/grid-forge/icon.svg" />
+
   <title>GridForge GIS</title>
+  <link rel="canonical" href="https://munah-a.github.io/grid-forge/" />
   <link rel="icon" type="image/svg+xml" href="icon.svg" />
+  <link rel="apple-touch-icon" href="icon.svg" />
+  <link rel="manifest" href="manifest.json" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 </head>
 
 <body>
@@ -17,14 +40,7 @@
     style="position:absolute;left:-9999px;top:auto;width:1px;height:1px;overflow:hidden;">Skip to main content</a>
   <div id="root" role="application" aria-label="GridForge GIS Application"></div>
   <script type="module" src="/src/main.jsx"></script>
-  <script>
-    // Service Worker registration
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('sw.js').catch(() => { });
-      });
-    }
-  </script>
+  <script src="sw-register.js" defer></script>
 </body>
 
 </html>

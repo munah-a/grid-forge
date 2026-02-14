@@ -1,0 +1,19 @@
+{
+  "name": "GridForge GIS",
+  "short_name": "GridForge",
+  "description": "Professional browser-based gridding, contouring & GIS visualization",
+  "start_url": "/grid-forge/",
+  "scope": "/grid-forge/",
+  "display": "standalone",
+  "background_color": "#0a0f1e",
+  "theme_color": "#0a0f1e",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ],
+  "categories": ["productivity", "utilities"]
+}

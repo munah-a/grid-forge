@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://munah-a.github.io/grid-forge/sitemap.xml

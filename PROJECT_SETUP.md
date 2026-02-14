@@ -49,7 +49,7 @@ grid-forge/
 
 1. **Install Dependencies:**
    ```bash
-   cd C:\Users\Munah\.openclaw\workspace\grid-forge
+   cd grid-forge
    npm install
    ```
 

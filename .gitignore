@@ -5,3 +5,16 @@ dist
 .env
 .env.local
 .claude/
+
+# OS files
+Thumbs.db
+Desktop.ini
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Test coverage
+coverage/
